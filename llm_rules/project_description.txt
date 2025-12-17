@@ -1,0 +1,175 @@
+1.ABSTRACT[a]
+This project proposes the design and development of a personalized running route planner that intelligently balances fitness objectives with touristic exploration. Existing applications, such as Strava and Komoot, either prioritize athletic metrics or focus solely on sightseeing, leaving a gap for “runner-tourists” who seek optimized routes that satisfy both physical training goals and the desire to discover new locations. In such applications the users are asked to set the points they want to pass through. However, in the case that they do not very well know the city it requires a lot of time to identify set of point of interests. To address this gap, the system will employ a hybrid optimization model based on routing and path planning algorithms such as but not limited to Dijkstra’s algorithm and the Prize-Collecting Traveling Salesperson Problem (PCTSP). The project aims to develop a cross-platform mobile application using Flutter and a high-performance C++ backend to compute multi-objective routes that integrate user-selected Points of Interest (POIs), target distances, and safety constraints. Data will be collected from Google Maps Places API and OpenStreetMap to construct a weighted graph representing the road network and POI nodes. By implementing constraint-based optimization routines and real-time data handling, the proposed system will generate efficient and personalized running routes while maintaining computational performance. Ultimately, this research contributes to the fields of route optimization and smart tourism by combining fitness, safety, and personalization into a single, adaptive solution.
+
+ 2. INTRODUCTION
+Walking and running are fundamental to the human experience, serving not only as primary modes of transit but also as deeply integrated components of physical and psychological well-being. Running, as a convenient and popular form of leisure-time physical activity, has a significant and documented impact on longevity. (Lee et al., 2017)  It is highly accessible, requiring no specialized training or membership, which makes it an ideal form of exercise.
+Despite these advantages, sustained motivation for running is often challenged by route monotony. Runners frequently report boredom from experiencing the "same route at every run". This problem is significantly amplified for individuals in an unfamiliar city, such as "runner tourists," who struggle to find a "practical and enjoyable running route.” (Loepp & Ziegler, 2018; Knoch et al., 2012). These users face a dual challenge: they wish to maintain their fitness regimen while also using their limited time to explore a new environment.
+The purpose of this project is to address this specific need by developing a "running route planner/optimizer". The system's core innovation is its dedicated focus on a hybrid  fitness and tourism goal. The system is intended to "benefit from alternative optimization routines to consider the preferences of the runner," specifically a target running distance and a desire to visit "the selected points of interest" (Chandrasekar et al., 2018; Ekqvist, 2019). 
+Literature Survey and The Gap A review of the state-of-the-art in existing commercial applications reveals a distinct gap, even among highly sophisticated platforms. Current solutions are generally divided into two categories (Loepp & Ziegler, 2018):
+1. Fitness-First Applications: Platforms like Strava have very strong points and utilize sophisticated algorithms to generate routes. However, their optimization is overwhelmingly focused on athletic metrics: target distance, elevation (minimizing or maximizing), and surface type (paved or trail). They do not emphasize Points of Interest (POIs) as a core variable in the optimization itself. While a user can find a POI or get a route to one, the system is not designed to solve the more complex problem of creating an optimal route of a set distance that incorporates multiple POIs.(Chandrasekar et al., 2018; Knoch et al., 2012)
+2. Tourism-First Applications: Platforms like Google Maps or TripAdvisor excel at POI discovery and creating walking tours, but they are not designed for athletic training. They lack the functionality to optimize a route for a specific, continuous running distance or to create the efficient loops that runners require. (Loepp & Ziegler, 2018)
+The gap this project will fill lies directly between these two categories. It targets the runner-tourist by treating route planning as a "multi-objective optimization problem". The system's primary differentiator will be its ability to find an optimal solution that simultaneously satisfies both the fitness objective (total distance) and the discovery objective (visiting a set of landmarks) 
+Alternative Approaches To solve this "multi-objective optimization problem", the project will "investigate appropriate methods for route planning". The analysis will move beyond simple shortest-path algorithms. (Chen & Li, 2020) The primary "alternative algorithms" to be considered are Dijkstra's algorithm , to establish foundational pathfinding, and algorithms for the Price-Collecting Traveling Salesperson Problem (PCTSP). (Balas, 1989; Gendreau et al., 1998) The PCTSP model is particularly well-suited for this hybrid goal, as it is mathematically designed to balance the "cost" of a route (running distance) with the "prize" collected from visiting desired nodes (the selected POIs).
+
+3. PROPOSED SOLUTION AND METHODS
+The proposed solution is to develop a cross-platform mobile application using Flutter. (Ekqvist, 2019) The application's core purpose is to solve a multi-objective optimization problem, finding a single running route that balances two conflicting preferences: a target running distance and a list of desired selected points of interest (POIs) (Chandrasekar et al., 2018; Liu et al., 2024).
+This project is complex because it does not have a straight-forward solution. It directly addresses conflicting technical issues, requiring the system to balance the "cost" of a route (target distance) against the "prize" of visiting nodes (the POIs). This problem has no obvious solution and requires abstract thinking and originality in analysis to formulate a suitable model, moving beyond simple shortest-path algorithms. It requires research-based knowledge to select, adapt, and implement the correct optimization model (a variant of the Prize-Collecting Traveling Salesperson Problem). Finally, it is a high-level problem involving various components that must be integrated, including multiple data sources (map networks and real-time POI data), a high-performance C++ backend, and a responsive Flutter frontend.
+
+3.1 PROPOSED METHODS
+3.1.1 Data Collection and Preparation
+To provide the necessary data for routing, two primary data streams will be established and integrated.
+* Method 1: POI Data Gathering (Google Maps Places API)
+   * Rich, dynamic data for points of interest (such as location, name, user ratings, and categories) will be fetched using the Google Maps Places API. (Ali & Ahmad, 2021)
+   * This method ensures that POI data is always current and relevant to the user's location.
+   * A caching strategy will be implemented within the application's database (as designed in WP3) to minimize API calls, manage economic costs, and improve app performance.
+* Method 2: Map Network Sourcing (OpenStreetMap)
+   * The underlying street, sidewalk, and path network required for route calculations will be sourced from OpenStreetMap (OSM) data. (Chandrasekar et al., 2018) This raw data will be preprocessed and converted into a graph data structure (consisting of nodes and weighted edges) that the C++ optimization engine can consume.
+ 
+3.1.2 Route Planning (Core Optimization Engine)
+The core of the project is the optimization engine that generates the route. This "computationally resource-extensive" component will be written in C++ to ensure high performance.
+* Method 1: Foundational Pathfinding (Dijkstra's Algorithm)
+   * Dijkstra's algorithm will be implemented as a foundational tool. (Chen & Li, 2020) Its primary function will be to efficiently calculate the shortest and most practical path between any two points in the map graph (e.g., from the start point to the first POI, or between two different POIs).
+* Method 2: Multi-Objective Optimization (Prize-Collecting TSP)
+   * To solve the primary problem of balancing distance versus visiting landmarks, a variant of the Prize-Collecting Traveling Salesperson Problem (PCTSP) will be investigated and implemented. (Balas, 1989; Gendreau et al., 1998)
+   * In this model, visiting a user-selected POI provides a "prize," while the running distance contributes to the "cost." The algorithm will find the best route that maximizes the prize collected within a given cost (distance) budget. (Gendreau et al., 1998) 
+* Method 3: Constraint-Based Optimization (Distance/Time-Constrained Variant)
+   * The standard PCTSP model will be adapted to handle the user's specific constraints. This will likely become a Distance-Constrained PCTSP (to meet the "target running distance") or a Time-Constrained PCTSP (to handle the "time budget" constraint identified in section 3.2).
+
+
+3.1.3 System Architecture and Implementation
+To deliver a seamless and responsive user experience, the application will be built using a hybrid architecture.
+* Method 1: Cross-Platform Frontend (Flutter)
+   * The user interface (UI) and all client-facing logic will be developed using Flutter (Dart). (Ekqvist, 2019) This allows for a single codebase to be compiled and deployed natively on both iOS and Android devices.
+* Method 2: High-Performance Backend (C++)
+   * All core optimization algorithms (Dijkstra, PCTSP) and graph processing will be implemented in C++ (Chandrasekar et al., 2018). This ensures that the computationally heavy route calculations are performed as quickly as possible, preventing UI lag.
+* Method 3: Communication Bridge (Dart FFI)
+   * The Flutter (Dart) frontend will communicate directly with the C++ backend logic using the dart:ffi (Foreign Function Interface) library. This provides a high-speed, low-latency bridge for passing user preferences to the C++ engine and receiving the final route data back, ensuring a responsive user experience.
+  
+3.2 Realistic Constraints
+The project is defined and affected by the following realistic constraints:
+* Economic: The primary economic constraint is the cost of the Google Maps Places API. As a commercial, pay-as-you-go service, the project will be constrained by the budget available for API calls during development, testing, and potential deployment.
+* Health and Safety: A critical constraint is ensuring user safety. The system cannot simply optimize for distance and POIs; it must also avoid routing users through unsafe areas (e.g., high-traffic roads without sidewalks, unlit paths, or areas with high crime rates). (Ali & Ahmad, 2021) This requires an additional layer of data or heuristics that the system must account for.
+* Social: This project has two major social constraints:
+   1. Personal Privacy: The application will handle sensitive user data, including real-time GPS location and route history. The system must be designed to be compliant with data privacy regulations (such as KVKK), ensuring user data is securely stored and handled ethically.
+   2. User Interface: The "Categorization of the user's preferences" is a key constraint. The Flutter UI must be simple and intuitive for a non-technical user to input their multiple complex preferences: target distance, POI selection, and their available time budget for the run.
+* Manufacturability (Software): This constraint relates to the technical feasibility of building the solution.
+   1. Algorithmic Complexity: The user requirement of having a limited time budget adds a third critical variable to the optimization (along with distance and POIs). This transforms the problem into a more complex, time-constrained optimization (such as a Time-Constrained Prize-Collecting TSP), which is a major constraint on the feasibility of the core algorithm.
+   2. API Dependency: The project relies on the Google Maps Places API, which has usage quotas, rate limits, and terms of service that must be strictly adhered to.
+   3. Data Availability: The "Health and Safety" constraint creates a data availability problem. The data required to determine "unsafe" areas (e.g., crime statistics, sidewalk availability, path lighting) is not readily available from Google Maps or OpenStreetMap and must be sourced, integrated, or inferred.
+* Sustainability: The long-term sustainability of the solution is constrained by its reliance on the commercial Google Maps Places API. Any changes to its pricing model, terms of service, or availability could render the application non-functional.
+
+3.3 Work Packages
+
+Workpackage number
+	WP2 
+	Title
+	Design, Prototyping & Algorithm Selection
+	Description
+	This package focuses on both the user interface (UI/UX) design and the selection of the most suitable route optimization algorithm, which is the project's core uncertainty. UI prototypes will be created, and potential algorithms will be benchmarked to select the most appropriate model.
+	Objectives
+	O2.1: To design an intuitive UI/UX capable of simply capturing the user's complex inputs (distance, POI list).
+	O2.2: To research, benchmark, and select the most suitable optimization algorithm (e.g., Distance-Constrained PCTSP) for the core engine.
+	O2.3: To design the detailed database schema and the C++ API contract.
+
+	Tasks
+	T2.1: Create wireframes and clickable prototypes (mockups) for the Flutter application. 
+	T2.2: Review prototypes for usability testing.
+	T2.3: Theoretically test and benchmark selected algorithm candidates (PCTSP variants) with small data sets
+	T2.4: Select the most suitable algorithm based on performance and solution quality
+
+
+Workpackage number
+	WP3 
+	Title
+	Backend Implementation & Data Engineering
+	Description
+	This is the "heavy-lifting" part of the project, to be written in C++. Data pipelines (OSM, Google API) will be built, and the core optimization algorithm selected in WP2 will be coded in C++.
+	Objectives
+	O3.1: To build the data pipeline that processes OpenStreetMap (OSM) data and converts it into a graph structure.
+	O3.2: To build the Google Maps Places API integration (including a caching mechanism).
+	O3.3: To efficiently implement the core optimization algorithm selected in WP2 in C++
+
+	Tasks (NOTE THAT THESE ARE IN PROGRESS, WE MIGHT NOT WORK WITH THESE EXPLICITLY, MIGHT CHANGE THE ALGORITHM OR HOW WE GATHER DATA)
+	T3.1: Write C++ modules to download, parse OSM data, and create a routable graph (nodes/edges).
+	T3.2: Write a service module to fetch POI data from Google Maps Places API and cache it in the local database.
+	T3.3: Code Dijkstra's algorithm in C++ for foundational pathfinding. 
+	T3.4: Code the selected main optimization algorithm
+
+	T3.5: Compile the C++ engine as a library (e.g., .dll, .so, .dylib) ready to be called by dart:ffi.
+	
+	Deliverables
+	D1: Functional C++ Backend Library (.dll, .so, .dylib)
+	D2: Completed Data Processing Pipeline (OSM and Google API)
+	D3: Optimized Routing Engine (C++ Source Code)
+	
+Workpackage number
+	WP4 
+	Title
+	Frontend Development & System Integration
+	Description
+	In this package, the Flutter application designed in WP2 will be developed and connected to the C++ backend engine developed in WP3 using the dart:ffi bridge. The goal is to achieve an end-to-end working prototype.
+	Objectives
+	O4.1: To develop all Flutter UI screens according to the designs from WP2. 
+	O4.2: To successfully integrate the Flutter application with the C++ backend using dart:ffi.
+	O4.3: To provide a fully functional flow that takes user inputs, sends them to C++, and displays the resulting route on the map.
+	
+	Tasks
+	T4.1: Code all application screens (Map, POI selection, Settings, etc.) in Flutter. 
+	T4.2: Implement state management for Flutter (e.g., Riverpod, BLoC). 
+	T4.3: Establish the dart:ffi bridge to call C++ functions. 
+	T4.4: Manage data structure serialization (e.g., list of route coordinates) between Dart and C++.
+	T4.5: Draw the route returned from the C++ engine on the map in Flutter.
+
+	Deliverables
+	D1: Flutter Application Source Code
+	D2: Functional dart:ffi Integration Module 
+	D3: Compiled application package (APK / iOS build) (NOT IMPORTANT AT THE MOMENT)
+	
+Workpackage number (THIS IS NOT NEEDED AT THE MOMENT, WE'LL LOOK AT IT LATER WHEN WE HAVE A WORKING APP)
+	WP5 
+	Title	Testing, Validation & Final Reporting
+	Description
+	The final work package is dedicated to validating that the system meets the requirements from WP1, debugging, making performance optimizations, and writing the final project report.
+	Objectives
+	O5.1: To verify that the system meets all functional and non-functional requirements. 
+	O5.2: To identify and fix performance bottlenecks and bugs. 
+	O5.3: To prepare the project's final technical documentation and project report.
+	Testing, Validation & Final Reporting
+	Description
+	The final work package is dedicated to validating that the system meets the requirements from WP1, debugging, making performance optimizations, and writing the final project report.
+	Objectives
+
+	O5.1: To verify that the system meets all functional and non-functional requirements. 
+	
+
+	O5.2: To identify and fix performance bottlenecks and bugs. 
+	
+
+	O5.3: To prepare the project's final technical documentation and project report.
+	
+
+
+	Tasks
+	T5.1: Write unit tests for C++ and Dart code. 
+	
+
+	T5.2: Conduct integration tests for the dart:ffi bridge and data flow.
+	
+
+	T5.3: Perform end-to-end system testing and User Acceptance Testing (UAT) with real-world scenarios.
+	
+
+	T5.4: Profile and optimize the C++ algorithm's memory and CPU usage.
+	
+
+	T5.5: Write the final project report and technical documentation.
+	
+	Deliverables
+	D1: Test Plan and Test Results Report
+	
+
+	D2: Final, validated, and optimized mobile application 
+	
+
+	D3: Final Project Report and Technical Documentation
+	

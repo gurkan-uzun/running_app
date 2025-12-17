@@ -1,0 +1,30 @@
+# ANTIGRAVITY AGENT RULES
+
+## 1. OPERATIONAL SAFETY (PRIME DIRECTIVES)
+- **NO DELETION:** You are strictly PROHIBITED from deleting or removing any files, directories, or code blocks unless explicitly requested by the user. If a refactor requires removal, ask for permission first.
+- **BACKUP FIRST:** Before making significant architectural changes to the C++ backend or Dart FFI bridge, suggest creating a backup of the current state.
+
+## 2. SYSTEM ARCHITECTURE & BOUNDARIES
+This project uses a hybrid architecture. You must strictly adhere to these layer boundaries:
+- **Layer 1 (Data):** Handles OSM data parsing and Google Maps API fetching.
+  - *Rule:* Always prioritize caching POI data locally (SQLite/JSON) to minimize API costs.
+- **Layer 2 (Core Engine - C++):** Handles heavy optimization logic (PCTSP, Dijkstra).
+  - *Rule:* All pathfinding and heavy math MUST be written in C++, not Dart.
+  - *Rule:* Performance is critical (<3s target). Optimize memory usage strictly.
+- **Layer 3 (UI - Flutter):** Handles user interaction, map rendering, and state management.
+  - *Rule:* Keep logic minimal here. Pass complex requests to the C++ backend immediately.
+
+## 3. INTEGRATION & INTERFACE FLEXIBILITY
+- **Lenient Interface Design:** Do not enforce strict validation or rigid argument parsing during the prototyping phase.
+  - *Guideline:* If an argument is missing or malformed, use safe defaults or log a warning rather than throwing a hard exception/crash.
+  - *Guideline:* For the `dart:ffi` bridge, prefer passing serialized data (like JSON strings) over complex, strict C-structs initially. This avoids rigid type crashes and allows for easier argument modification.
+- **Interface Stability:** When writing `dart:ffi` bindings, prioritize stability. Ensure memory allocated in C++ is properly freed before control returns to Dart.
+
+## 4. ALGORITHMIC FOCUS
+- **Primary Model:** The routing logic is based on the Prize-Collecting Traveling Salesperson Problem (PCTSP). Balance "Cost" (Distance) vs. "Prize" (POI Value).
+- **Fallback:** If exact PCTSP is too slow, be ready to suggest or implement heuristic approaches (Genetic or Greedy algorithms).
+
+## 5. CODE STYLE & CONVENTIONS
+- **C++:** Use modern C++ (C++17 or newer). Prioritize type safety and distinct separation of headers (.h) and implementation (.cpp).
+- **Dart:** Use robust state management (Riverpod or BLoC) as per the architectural plan.
+- **Context Awareness:** When the user asks for "strict handlings" updates, assume they want to harden the code for production. Until then, prioritize "running code" over "perfectly validated code."

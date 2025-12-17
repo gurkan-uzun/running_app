@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:running_app/screens/ProfilePage.dart';
-import 'package:running_app/screens/SocialPage.dart';
+import 'package:running_app/screens/profile_page.dart';
+import 'package:running_app/screens/social_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});

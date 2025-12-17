@@ -28,6 +28,7 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  ffi: ^2.1.2
   flutter:
     sdk: flutter
 
@@ -45,6 +46,7 @@ dependencies:
 
   # for chart in the social tab
   fl_chart: ^0.66.0
+  http: ^1.6.0
 
 
 dev_dependencies:
