@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'preferences_screen.dart';
+import '../services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -202,7 +205,7 @@ class _AnalysisTab extends StatelessWidget {
                 case 7: text = '7'; break;
                 default: return Container();
               }
-              return SideTitleWidget(axisSide: meta.axisSide, child: Text(text, style: style));
+              return Text(text, style: style);
             },
           ),
         ),
@@ -247,46 +250,62 @@ class _AnalysisTab extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// TAB 2: PROFILE INFO (Placeholders)
+// TAB 2: PROFILE INFO
 // ---------------------------------------------------------------------------
 class _ProfileInfoTab extends StatelessWidget {
   const _ProfileInfoTab();
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName ?? user?.email?.split('@')[0] ?? 'Runner';
+    final email = user?.email ?? '';
+    
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           children: [
             const SizedBox(height: 20),
-            const CircleAvatar(
+            CircleAvatar(
               radius: 50,
-              backgroundImage: NetworkImage("https://i.pravatar.cc/300"), // Placeholder
+              backgroundImage: user?.photoURL != null 
+                ? NetworkImage(user!.photoURL!) 
+                : const NetworkImage("https://i.pravatar.cc/300"),
             ),
             const SizedBox(height: 16),
-            const Text(
-              "John Doe",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            Text(
+              displayName,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-            const Text(
-              "Runner | Explorer | Coffee Lover",
-              style: TextStyle(color: Colors.grey),
+            Text(
+              email,
+              style: const TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 30),
             
+            _buildProfileItem(context, Icons.route, "Route Preferences", onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const PreferencesScreen()),
+              );
+            }),
             _buildProfileItem(context, Icons.person_outline, "Edit Profile"),
-            _buildProfileItem(context, Icons.settings_outlined, "Settings"),
             _buildProfileItem(context, Icons.notifications_outlined, "Notifications"),
             _buildProfileItem(context, Icons.privacy_tip_outlined, "Privacy Policy"),
-            _buildProfileItem(context, Icons.logout, "Log Out", isDestructive: true),
+            _buildProfileItem(context, Icons.logout, "Log Out", isDestructive: true, onTap: () async {
+              await AuthService().signOut();
+              if (context.mounted) {
+                Navigator.pushReplacementNamed(context, '/SignInPage');
+              }
+            }),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileItem(context, IconData icon, String text, {bool isDestructive = false}) {
+  Widget _buildProfileItem(context, IconData icon, String text, {bool isDestructive = false, VoidCallback? onTap}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -303,11 +322,7 @@ class _ProfileInfoTab extends StatelessWidget {
           ),
         ),
         trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-        onTap: () {
-          if(text == "Log Out") {
-            Navigator.pushReplacementNamed(context, '/SignInPage');
-          }
-        },
+        onTap: onTap,
       ),
     );
   }

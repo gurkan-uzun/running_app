@@ -1,12 +1,17 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:running_app/services/overpass_service.dart';
 import 'package:running_app/services/native_service.dart';
+import 'package:running_app/services/database_service.dart';
 import 'package:running_app/models/poi.dart';
+import 'package:running_app/models/trip.dart';
+import 'package:running_app/models/user_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class MapTestScreen extends StatefulWidget {
   const MapTestScreen({super.key});
@@ -19,6 +24,8 @@ class _MapTestScreenState extends State<MapTestScreen> {
   final MapController _mapController = MapController();
   final OverpassService _overpassService = OverpassService();
   final NativeService _nativeService = NativeService();
+  final DatabaseService _dbService = DatabaseService();
+  List<LatLng> _currentRoutePoints = [];
 
   List<Marker> _markers = [];
   List<Polyline> _polylines = [];
@@ -87,18 +94,44 @@ class _MapTestScreenState extends State<MapTestScreen> {
     
     List<Poi> pois = await _overpassService.fetchPois(centerLat, centerLon, radius);
     
+    // Load user preferences and filter POIs
+    UserPreferences prefs = UserPreferences();
+    try {
+      if (FirebaseAuth.instance.currentUser != null) {
+        prefs = await _dbService.getPreferences();
+      }
+    } catch (e) {
+      print('Could not load preferences: $e');
+    }
+    
+    // Filter POIs based on preferences
+    List<Poi> filteredPois = pois.where((poi) => poi.matchesPreferences(prefs)).toList();
+    
     setState(() {
-      _markers = pois.map((poi) => Marker(
+      _markers = filteredPois.map((poi) => Marker(
         point: LatLng(poi.lat, poi.lon),
         width: 40,
         height: 40,
         child: GestureDetector(
           onTap: () => _showPoiDetails(poi),
-          child: const Icon(Icons.location_on, color: Colors.red, size: 30),
+          child: Icon(Icons.location_on, color: _getCategoryColor(poi.category), size: 30),
         ),
       )).toList();
-      _status = "Found ${pois.length} POIs in visible area";
+      _status = "Found ${filteredPois.length} POIs (${pois.length} total, filtered by preferences)";
     });
+  }
+  
+  Color _getCategoryColor(PoiCategory category) {
+    switch (category) {
+      case PoiCategory.park: return Colors.green;
+      case PoiCategory.museum: return Colors.purple;
+      case PoiCategory.viewpoint: return Colors.blue;
+      case PoiCategory.cafe: return Colors.brown;
+      case PoiCategory.restaurant: return Colors.orange;
+      case PoiCategory.monument: return Colors.grey;
+      case PoiCategory.nature: return Colors.teal;
+      case PoiCategory.beach: return Colors.cyan;
+    }
   }
 
   void _showPoiDetails(Poi poi) {
@@ -194,7 +227,10 @@ class _MapTestScreenState extends State<MapTestScreen> {
       List<LatLng> routePoints = await _nativeService.getRoute(start, end);
       
       if (routePoints.length >= 2) {
-        setState(() => _status = "Route Found (${routePoints.length} points)");
+        setState(() {
+          _status = "Route Found (${routePoints.length} points)";
+          _currentRoutePoints = routePoints; // Store for saving
+        });
         _polylines = [
             Polyline(points: routePoints, strokeWidth: 4.0, color: Colors.blue)
         ];
@@ -272,6 +308,72 @@ class _MapTestScreenState extends State<MapTestScreen> {
         );
       },
     );
+  }
+
+  Future<void> _saveTrip() async {
+    if (_currentRoutePoints.isEmpty || _selectedStart == null || _selectedEnd == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No route to save")),
+      );
+      return;
+    }
+
+    // Check if user is logged in
+    if (FirebaseAuth.instance.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please sign in to save trips")),
+      );
+      return;
+    }
+
+    setState(() => _status = "Saving trip...");
+
+    try {
+      // Calculate distance
+      double totalDistance = 0;
+      for (int i = 0; i < _currentRoutePoints.length - 1; i++) {
+        final p1 = _currentRoutePoints[i];
+        final p2 = _currentRoutePoints[i + 1];
+        // Simple distance calculation (Haversine would be more accurate)
+        totalDistance += _calculateDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude);
+      }
+
+      final trip = Trip(
+        startPoint: _selectedStart!,
+        endPoint: _selectedEnd!,
+        routeCoords: _currentRoutePoints,
+        distance: totalDistance,
+      );
+
+      await _dbService.saveTrip(trip);
+
+      setState(() {
+        _status = "Trip saved! (${(totalDistance / 1000).toStringAsFixed(2)} km)";
+        _currentRoutePoints = []; // Clear after saving
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Trip saved: ${(totalDistance / 1000).toStringAsFixed(2)} km")),
+      );
+    } catch (e) {
+      setState(() => _status = "Save failed: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to save trip: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    // Haversine formula
+    const double R = 6371000; // Earth radius in meters
+    double dLat = (lat2 - lat1) * math.pi / 180;
+    double dLon = (lon2 - lon1) * math.pi / 180;
+    double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) * 
+        math.cos(lat2 * math.pi / 180) *
+        math.sin(dLon / 2) * math.sin(dLon / 2);
+    double c = 2 * math.asin(math.sqrt(a));
+    return R * c;
   }
 
 
@@ -354,6 +456,11 @@ class _MapTestScreenState extends State<MapTestScreen> {
                  ElevatedButton(
                   onPressed: _calculateRoute,
                   child: const Text("3. Route"),
+                ),
+                ElevatedButton(
+                  onPressed: _currentRoutePoints.isNotEmpty ? _saveTrip : null,
+                  child: const Text("4. Save"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                 ),
                 ElevatedButton(
                   onPressed: _showNativeLogs,

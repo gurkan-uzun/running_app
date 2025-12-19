@@ -1,8 +1,81 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../services/auth_service.dart';
+import '../services/database_service.dart';
 
-class SignupPage extends StatelessWidget {
+class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
+
+  @override
+  State<SignupPage> createState() => _SignupPageState();
+}
+
+class _SignupPageState extends State<SignupPage> {
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _authService = AuthService();
+  final _dbService = DatabaseService();
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signUpWithEmail() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showError('Please enter email and password');
+      return;
+    }
+
+    if (_passwordController.text.length < 6) {
+      _showError('Password must be at least 6 characters');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _authService.signUpWithEmail(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
+      // Initialize user profile
+      await _dbService.initializeUserProfile();
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/HomePage');
+      }
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signUpWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final result = await _authService.signInWithGoogle();
+      if (result != null) {
+        await _dbService.initializeUserProfile();
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/HomePage');
+        }
+      }
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,14 +95,13 @@ class SignupPage extends StatelessWidget {
                   "Running App",
                   style: TextStyle(
                     fontSize: 28,
-                    fontWeight: FontWeight.w900, // Extra bold
+                    fontWeight: FontWeight.w900,
                     color: Colors.black,
-                    fontFamily: 'Arial', // Default fallbacks usually work fine too
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  "The Ultimate Running App??",
+                  "The Ultimate Running App",
                   style: TextStyle(
                     fontSize: 16,
                     color: Colors.black87,
@@ -61,22 +133,56 @@ class SignupPage extends StatelessWidget {
 
                 // Email Input Field
                 TextField(
+                  controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
                     hintText: 'email@domain.com',
                     hintStyle: TextStyle(color: Colors.grey[400]),
                     contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                    // Default border
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!),
                     ),
-                    // Unfocused border
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey[300]!),
                     ),
-                    // Focused border
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Password Input Field
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    hintText: 'Password (min 6 characters)',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        color: Colors.grey,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: const BorderSide(color: Colors.black, width: 1.5),
@@ -91,9 +197,7 @@ class SignupPage extends StatelessWidget {
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: () {
-                      // TODO: Implement Email Auth Logic
-                    },
+                    onPressed: _isLoading ? null : _signUpWithEmail,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
@@ -102,10 +206,19 @@ class SignupPage extends StatelessWidget {
                       ),
                       elevation: 0,
                     ),
-                    child: const Text(
-                      "Continue",
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Text(
+                            "Sign Up",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ),
 
@@ -127,13 +240,13 @@ class SignupPage extends StatelessWidget {
                 ),
 
                 TextButton(
-                  onPressed: () => {
-                    Navigator.pushReplacementNamed(context, '/SignInPage')
+                  onPressed: () {
+                    Navigator.pushReplacementNamed(context, '/SignInPage');
                   },
-                  child: Text(
+                  child: const Text(
                     "Already have an account?",
                     style: TextStyle(
-                      color: Colors.black,               
+                      color: Colors.black,
                       decoration: TextDecoration.underline,
                       decorationColor: Colors.black,
                     ),
@@ -141,25 +254,12 @@ class SignupPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
 
-                // Social Buttons
+                // Google Sign Up
                 _SocialButton(
                   icon: FontAwesomeIcons.google,
                   label: "Continue with Google",
-                  iconColor: Colors.red, // Google G colors
-                  onTap: () {
-                     // TODO: Implement Google Auth Logic
-                  },
-                ),
-                
-                const SizedBox(height: 12),
-                
-                _SocialButton(
-                  icon: FontAwesomeIcons.apple,
-                  label: "Continue with Apple",
-                  iconColor: Colors.black,
-                  onTap: () {
-                     // TODO: Implement Apple Auth Logic
-                  },
+                  iconColor: Colors.red,
+                  onTap: _isLoading ? () {} : _signUpWithGoogle,
                 ),
 
                 const SizedBox(height: 40),
@@ -196,7 +296,7 @@ class SignupPage extends StatelessWidget {
   }
 }
 
-// Helper Widget to keep code clean
+// Helper Widget
 class _SocialButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -218,7 +318,7 @@ class _SocialButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: onTap,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFF2F2F2), // Light grey background
+          backgroundColor: const Color(0xFFF2F2F2),
           foregroundColor: Colors.black,
           elevation: 0,
           shape: RoundedRectangleBorder(

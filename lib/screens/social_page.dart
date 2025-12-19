@@ -183,7 +183,7 @@ class _SocialFeedTab extends StatelessWidget {
       lineTouchData: LineTouchData(
         touchTooltipData: LineTouchTooltipData(
           // In older versions, use 'tooltipBgColor' (Color) instead of 'getTooltipColor' (Function)
-          tooltipBgColor: Colors.black, 
+          getTooltipColor: (spot) => Colors.black, 
           
           // Customize text to be White and Bold
           getTooltipItems: (List<LineBarSpot> touchedBarSpots) {

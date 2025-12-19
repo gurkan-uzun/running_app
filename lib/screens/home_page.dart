@@ -113,6 +113,15 @@ class _HomeContentState extends State<HomeContent> {
           style: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        // TODO: REMOVE THIS PART
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+               Navigator.pushNamed(context, '/MapTest');
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(

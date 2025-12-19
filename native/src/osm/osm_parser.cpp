@@ -248,46 +248,136 @@ int OsmParser::parseString(const char* xmlData, Graph& graph, char* errorOut, in
     
     printf("Parsed %lu nodes from string.\n", graph.nodes.size());
 
-    // 2. Parse Ways
+    // 2. Parse Ways with Road Type Weights
     element = root->FirstChildElement("way");
     
     size_t edgeCount = 0;
     size_t wayCount = 0;
+    size_t skippedWays = 0;
+    // Road type weights: 1.0 = allowed, 0 = blocked
+    // Currently using uniform weights for pure shortest-distance routing
+    // TODO: Add user preference for "Prefer footpaths" vs "Shortest route"
+    std::unordered_map<std::string, double> roadWeights = {
+        // All allowed roads - uniform weight for shortest distance
+        {"footway", 1.0},
+        {"pedestrian", 1.0},
+        {"path", 1.0},
+        {"steps", 1.0},
+        {"track", 1.0},
+        {"cycleway", 1.0},
+        {"living_street", 1.0},
+        {"residential", 1.0},
+        {"service", 1.0},
+        {"unclassified", 1.0},
+        {"tertiary", 1.0},
+        {"tertiary_link", 1.0},
+        {"secondary", 1.0},
+        {"secondary_link", 1.0},
+        {"crossing", 1.0},
+        {"primary", 1.0},
+        {"primary_link", 1.0},
+        {"trunk", 1.0},
+        {"trunk_link", 1.0},
+        
+        // Blocked (weight 0) - truly dangerous, never run here
+        {"motorway", 0},
+        {"motorway_link", 0},
+        {"construction", 0},
+        {"proposed", 0},
+        {"raceway", 0},
+    };
 
     while (element != nullptr) {
-        // DEBUG: Allow all ways (User Request for Testing)
-        bool isRunnable = true; 
+        double weightMultiplier = 0.0; // 0 = skip this way
+        bool hasSidewalk = false;
+        bool footAllowed = false;
+        std::string highwayType = "";
         
-        if (isRunnable) {
-            std::vector<int64_t> wayNodes;
-            XMLElement* nd = element->FirstChildElement("nd");
-            while (nd != nullptr) {
-                int64_t ref = nd->Int64Attribute("ref");
-                wayNodes.push_back(ref);
-                nd = nd->NextSiblingElement("nd");
-            }
+        // Parse tags to determine road type and properties
+        XMLElement* tag = element->FirstChildElement("tag");
+        while (tag != nullptr) {
+            const char* k = tag->Attribute("k");
+            const char* v = tag->Attribute("v");
             
-            if (wayNodes.size() > 1) {
-                wayCount++;
-                for (size_t i = 0; i < wayNodes.size() - 1; ++i) {
-                    int64_t u = wayNodes[i];
-                    int64_t v = wayNodes[i+1];
-                    
-                    if (graph.nodes.find(u) != graph.nodes.end() && graph.nodes.find(v) != graph.nodes.end()) {
-                        Node& n1 = graph.nodes[u];
-                        Node& n2 = graph.nodes[v];
-                        double dist = calculateDistance(n1.lat, n1.lon, n2.lat, n2.lon);
-                        graph.addEdge(u, v, dist);
-                        graph.addEdge(v, u, dist);
-                        edgeCount += 2;
+            if (k != nullptr && v != nullptr) {
+                std::string key(k);
+                std::string val(v);
+                
+                // Get highway type
+                if (key == "highway") {
+                    highwayType = val;
+                    auto it = roadWeights.find(val);
+                    if (it != roadWeights.end()) {
+                        weightMultiplier = it->second;
+                    } else {
+                        // Unknown highway type - allow with high weight
+                        weightMultiplier = 2.5;
                     }
+                }
+                
+                // Check for foot access (can override blocking)
+                if (key == "foot" && (val == "yes" || val == "designated" || val == "permissive")) {
+                    footAllowed = true;
+                }
+                
+                // Check for sidewalks (can make blocked roads usable)
+                if (key == "sidewalk" && (val == "yes" || val == "both" || val == "left" || val == "right")) {
+                    hasSidewalk = true;
+                }
+                
+                // Parks and leisure areas are always good
+                if (key == "leisure" && (val == "park" || val == "garden" || val == "nature_reserve")) {
+                    weightMultiplier = 1.0;
+                }
+            }
+            tag = tag->NextSiblingElement("tag");
+        }
+        
+        // Apply overrides based on foot access and sidewalks
+        if (weightMultiplier == 0.0 && (footAllowed || hasSidewalk)) {
+            weightMultiplier = 1.5; // Allow blocked roads if they have sidewalks/foot access
+        }
+        
+        // Skip if still blocked
+        if (weightMultiplier <= 0.0) {
+            skippedWays++;
+            element = element->NextSiblingElement("way");
+            continue;
+        }
+        
+        // Parse nodes and create edges with weighted distance
+        std::vector<int64_t> wayNodes;
+        XMLElement* nd = element->FirstChildElement("nd");
+        while (nd != nullptr) {
+            int64_t ref = nd->Int64Attribute("ref");
+            wayNodes.push_back(ref);
+            nd = nd->NextSiblingElement("nd");
+        }
+        
+        if (wayNodes.size() > 1) {
+            wayCount++;
+            for (size_t i = 0; i < wayNodes.size() - 1; ++i) {
+                int64_t u = wayNodes[i];
+                int64_t v = wayNodes[i+1];
+                
+                if (graph.nodes.find(u) != graph.nodes.end() && graph.nodes.find(v) != graph.nodes.end()) {
+                    Node& n1 = graph.nodes[u];
+                    Node& n2 = graph.nodes[v];
+                    double dist = calculateDistance(n1.lat, n1.lon, n2.lat, n2.lon);
+                    
+                    // Apply weight multiplier to prefer better roads
+                    double weightedDist = dist * weightMultiplier;
+                    
+                    graph.addEdge(u, v, weightedDist);
+                    graph.addEdge(v, u, weightedDist);
+                    edgeCount += 2;
                 }
             }
         }
         element = element->NextSiblingElement("way");
     }
     
-    printf("Parsed %lu ways with %lu edges.\n", wayCount, edgeCount);
+    printf("Parsed %lu ways with %lu edges (skipped %lu blocked ways).\n", wayCount, edgeCount, skippedWays);
     printf("Adjacency list has %lu entries.\n", graph.adjacency_list.size());
     
     // 3. POST-PROCESSING: Connect nearby intersection nodes (OPTIMIZED with spatial grid)

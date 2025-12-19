@@ -38,15 +38,22 @@ dependencies:
   font_awesome_flutter: ^10.6.0
 
   # map dependencies
-  flutter_map: ^6.0.0 # Standard open source map package
+  flutter_map: ^8.2.2 # Standard open source map package
   latlong2: ^0.9.0    # Helper for coordinates
   
   # for images 
   cached_network_image: ^3.3.0
 
   # for chart in the social tab
-  fl_chart: ^0.66.0
+  fl_chart: ^0.69.0
   http: ^1.6.0
+  path_provider: ^2.1.1
+
+  # Firebase
+  firebase_core: ^4.3.0
+  firebase_auth: ^6.1.3
+  cloud_firestore: ^6.1.1
+  google_sign_in: ^6.1.6
 
 
 dev_dependencies:
