@@ -122,4 +122,31 @@ class NativeService {
       calloc.free(coordsPtr);
     }
   }
+
+  // Snap a coordinate to the nearest walkable graph node
+  // Returns the snapped LatLng or null if graph not loaded
+  Future<LatLng?> getNearestNode(double lat, double lon) async {
+    try {
+      final getNearestNodeFunc = _nativeLib
+          .lookup<NativeFunction<Int32 Function(Double, Double, Pointer<Double>, Pointer<Double>)>>('get_nearest_node')
+          .asFunction<int Function(double, double, Pointer<Double>, Pointer<Double>)>();
+
+      final Pointer<Double> outLat = calloc<Double>();
+      final Pointer<Double> outLon = calloc<Double>();
+
+      try {
+        final result = getNearestNodeFunc(lat, lon, outLat, outLon);
+        if (result == 1) {
+          return LatLng(outLat.value, outLon.value);
+        }
+        return null;
+      } finally {
+        calloc.free(outLat);
+        calloc.free(outLon);
+      }
+    } catch (e) {
+      print('Error getting nearest node: $e');
+      return null;
+    }
+  }
 }

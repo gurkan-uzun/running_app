@@ -226,6 +226,31 @@ int32_t test_poi_service() {
     return pois.size();
 }
 
+// Find nearest graph node to given coordinates and return its lat/lon
+// Returns 1 on success (outLat/outLon filled), 0 if graph not loaded or no node found
+int32_t get_nearest_node(double lat, double lon, double* outLat, double* outLon) {
+    if (!g_isGraphLoaded) {
+        native_log("Native Error: Graph not loaded for get_nearest_node.");
+        return 0;
+    }
+    
+    int64_t nodeId = NearestNeighbor::findNearestNode(g_graph, lat, lon);
+    
+    if (nodeId == -1) {
+        native_log("Native: No nearest node found for (%.6f, %.6f)", lat, lon);
+        return 0;
+    }
+    
+    if (g_graph.nodes.find(nodeId) != g_graph.nodes.end()) {
+        Node& n = g_graph.nodes[nodeId];
+        *outLat = n.lat;
+        *outLon = n.lon;
+        return 1;
+    }
+    
+    return 0;
+}
+
 #ifdef __cplusplus
 }
 #endif

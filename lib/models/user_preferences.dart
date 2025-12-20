@@ -8,6 +8,7 @@ enum PoiCategory {
   monument,
   nature,
   beach,
+  other, // For unrecognized categories - filtered out by default
 }
 
 extension PoiCategoryExtension on PoiCategory {
@@ -29,6 +30,8 @@ extension PoiCategoryExtension on PoiCategory {
         return 'Nature';
       case PoiCategory.beach:
         return 'Beaches';
+      case PoiCategory.other:
+        return 'Other';
     }
   }
 
@@ -50,6 +53,8 @@ extension PoiCategoryExtension on PoiCategory {
         return '🏞️';
       case PoiCategory.beach:
         return '🏖️';
+      case PoiCategory.other:
+        return '📍';
     }
   }
 }

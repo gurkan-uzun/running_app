@@ -104,19 +104,57 @@ class _MapTestScreenState extends State<MapTestScreen> {
       print('Could not load preferences: $e');
     }
     
+    // Debug: Print preferences and category distribution
+    print('=== POI Debug ===');
+    print('Preferred categories: ${prefs.preferredCategories.map((c) => c.name).toList()}');
+    print('Avoided categories: ${prefs.avoidCategories.map((c) => c.name).toList()}');
+    
+    // Count categories
+    Map<PoiCategory, int> catCount = {};
+    for (var poi in pois) {
+      catCount[poi.category] = (catCount[poi.category] ?? 0) + 1;
+    }
+    print('Category distribution: ${catCount.map((k, v) => MapEntry(k.name, v))}');
+    
+    // Show beach POIs specifically
+    var beaches = pois.where((p) => p.category == PoiCategory.beach).toList();
+    print('Beach POIs found: ${beaches.length}');
+    for (var b in beaches.take(5)) {
+      print('  - ${b.name} (${b.rawCategory})');
+    }
+    
     // Filter POIs based on preferences
     List<Poi> filteredPois = pois.where((poi) => poi.matchesPreferences(prefs)).toList();
     
-    setState(() {
-      _markers = filteredPois.map((poi) => Marker(
-        point: LatLng(poi.lat, poi.lon),
+    print('Total: ${pois.length}, After filter: ${filteredPois.length}');
+    print('=================');
+    
+    // Snap area POIs to nearest walkable path if graph is loaded
+    List<Marker> markers = [];
+    for (var poi in filteredPois) {
+      LatLng displayPoint = LatLng(poi.lat, poi.lon);
+      
+      // If graph is loaded, try to snap to nearest walkable node
+      if (_isGraphReady) {
+        final snappedPoint = await _nativeService.getNearestNode(poi.lat, poi.lon);
+        if (snappedPoint != null) {
+          displayPoint = snappedPoint;
+        }
+      }
+      
+      markers.add(Marker(
+        point: displayPoint,
         width: 40,
         height: 40,
         child: GestureDetector(
           onTap: () => _showPoiDetails(poi),
           child: Icon(Icons.location_on, color: _getCategoryColor(poi.category), size: 30),
         ),
-      )).toList();
+      ));
+    }
+    
+    setState(() {
+      _markers = markers;
       _status = "Found ${filteredPois.length} POIs (${pois.length} total, filtered by preferences)";
     });
   }
@@ -131,6 +169,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
       case PoiCategory.monument: return Colors.grey;
       case PoiCategory.nature: return Colors.teal;
       case PoiCategory.beach: return Colors.cyan;
+      case PoiCategory.other: return Colors.red;
     }
   }
 

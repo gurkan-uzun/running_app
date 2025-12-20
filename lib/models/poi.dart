@@ -78,28 +78,38 @@ class Poi {
       return PoiCategory.monument;
     }
     
-    // Nature
-    if (raw == 'nature_reserve' || raw == 'forest' || raw == 'wood' ||
-        raw == 'wetland' || raw == 'cliff' || raw == 'peak' ||
-        tags?['natural'] != null) {
-      return PoiCategory.nature;
-    }
-    
-    // Beach
-    if (raw == 'beach' || raw == 'swimming_area' || raw == 'marina' || raw == 'Beach') {
+    // Beach - CHECK BEFORE nature to avoid catching natural=beach
+    if (raw == 'beach' || raw == 'swimming_area' || raw == 'marina' || raw == 'Beach' ||
+        tags?['natural'] == 'beach') {
       return PoiCategory.beach;
     }
     
-    // Default to park as it's most common for outdoor activities
-    return PoiCategory.park;
+    // Nature - only major natural features worth visiting, NOT trees/bushes/rocks
+    final naturalValue = tags?['natural'];
+    final validNatureValues = ['nature_reserve', 'forest', 'wood', 'wetland', 
+                                'cliff', 'peak', 'volcano', 'valley', 'spring',
+                                'hot_spring', 'geyser', 'cave_entrance', 'glacier'];
+    if (raw == 'nature_reserve' || 
+        (naturalValue != null && validNatureValues.contains(naturalValue))) {
+      return PoiCategory.nature;
+    }
+    
+    // Default - unrecognized category
+    return PoiCategory.other;
   }
 
   /// Check if this POI matches user preferences
   bool matchesPreferences(UserPreferences prefs) {
-    // If user has no preferred categories, show all
+    // 'other' category is always hidden when user has specific preferences
+    if (category == PoiCategory.other && prefs.preferredCategories.isNotEmpty) {
+      return false;
+    }
+    
+    // If user has no preferred categories, show all except avoided ones
     if (prefs.preferredCategories.isEmpty) {
       return !prefs.avoidCategories.contains(category);
     }
+    
     // Show only preferred categories, excluding avoided ones
     return prefs.preferredCategories.contains(category) &&
            !prefs.avoidCategories.contains(category);
