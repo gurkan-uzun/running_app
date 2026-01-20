@@ -5,13 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:running_app/services/overpass_service.dart';
-import 'package:running_app/services/native_service.dart';
+import 'package:running_app/services/route_api_service.dart';
 import 'package:running_app/services/database_service.dart';
 import 'package:running_app/models/poi.dart';
 import 'package:running_app/models/trip.dart';
 import 'package:running_app/models/user_preferences.dart';
+import 'package:running_app/models/generated_route.dart';
+import 'package:running_app/widgets/route_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'run_tracking_screen.dart';
 
 class MapTestScreen extends StatefulWidget {
   const MapTestScreen({super.key});
@@ -23,26 +26,44 @@ class MapTestScreen extends StatefulWidget {
 class _MapTestScreenState extends State<MapTestScreen> {
   final MapController _mapController = MapController();
   final OverpassService _overpassService = OverpassService();
-  final NativeService _nativeService = NativeService();
+  final RouteApiService _routeApiService = RouteApiService();
   final DatabaseService _dbService = DatabaseService();
   List<LatLng> _currentRoutePoints = [];
 
   List<Marker> _markers = [];
   List<Polyline> _polylines = [];
+  List<Poi> _currentPois = []; // Store current POIs for route optimization
   
   bool _isGraphReady = false;
+  bool _discoveryMode = true; // Prefer unvisited POIs in route optimization
+  Set<String> _visitedPoiIds = {}; // Loaded from Firestore
   String _status = "Ready";
+  
+  // Multi-route selection
+  List<GeneratedRoute> _routeOptions = [];
+  GeneratedRoute? _selectedRoute;
+  bool _showRouteSelector = false;
 
   // Kadikoy, Istanbul
   final LatLng _center = const LatLng(40.990, 29.020);
 
   Future<void> _downloadAndInit() async {
+    setState(() => _status = "Checking backend server...");
+    
+    // Check if backend is healthy
+    final health = await _routeApiService.healthCheck();
+    
+    if (health['status'] == 'ok' && health['graph_loaded'] == true) {
+      setState(() {
+        _isGraphReady = true;
+        _status = "Backend Ready: ${health['nodes_count']} nodes";
+      });
+      return;
+    }
+    
+    // If graph not loaded, download and send OSM data
     setState(() => _status = "Downloading Map Data...");
     
-    // Get visible bounds or use a fixed small area around center
-    // Ideally we use _mapController.camera.visibleBounds but let's use fixed small box for reliability first
-    // 1km box
-    // Get visible bounds
     final bounds = _mapController.camera.visibleBounds;
     double south = bounds.south;
     double west = bounds.west;
@@ -52,29 +73,26 @@ class _MapTestScreenState extends State<MapTestScreen> {
     String? path = await _overpassService.downloadMapData(south, west, north, east);
     
     if (path != null) {
-      setState(() => _status = "Reading Map File...");
+      setState(() => _status = "Sending to backend server...");
       try {
         File f = File(path);
         String xmlContent = await f.readAsString();
         
-        setState(() => _status = "Initializing C++ Graph...");
-        int nodeCount = await _nativeService.initGraph(xmlContent);
+        final result = await _routeApiService.initGraph(xmlContent);
         
-        if (nodeCount > 0) {
+        if (result['success'] == true) {
              setState(() {
                 _isGraphReady = true;
-                _status = "Graph Loaded: $nodeCount nodes";
+                _status = "Graph Loaded: ${result['nodes_count']} nodes";
              });
         } else {
-             // Get detailed error
-             String error = _nativeService.getLastError();
              setState(() {
                 _isGraphReady = false;
-                _status = "Graph Init Failed: $error";
+                _status = "Graph Init Failed: ${result['error']}";
              });
         }
       } catch (e) {
-        setState(() => _status = "File Read Error: $e");
+        setState(() => _status = "Error: $e");
       }
     } else {
       setState(() => _status = "Download Failed");
@@ -82,7 +100,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
   }
 
   Future<void> _fetchPois() async {
-    setState(() => _status = "Fetching POIs for visible area...");
+    setState(() => _status = "Fetching POIs from backend server...");
     
     final bounds = _mapController.camera.visibleBounds;
     // Calculate center of visible area
@@ -90,15 +108,51 @@ class _MapTestScreenState extends State<MapTestScreen> {
     double centerLon = bounds.center.longitude;
     
     // Calculate radius (approximate based on height)
-    double radius = 1000; // Default
+    double radius = 1000; // Default 1km
     
-    List<Poi> pois = await _overpassService.fetchPois(centerLat, centerLon, radius);
+    List<Poi> pois = [];
+    
+    // Try fetching from backend first (POIs are parsed during graph init)
+    if (_isGraphReady) {
+      setState(() => _status = "Fetching POIs from backend...");
+      List<Map<String, dynamic>> backendPois = await _routeApiService.fetchPoisFromBackend(
+        centerLat, centerLon, radius
+      );
+      
+      if (backendPois.isNotEmpty) {
+        // Convert backend JSON to Poi objects
+        pois = backendPois.map((data) {
+          // Map backend category to PoiCategory enum
+          PoiCategory category = _mapBackendCategory(data['category'] as String? ?? 'other');
+          
+          return Poi(
+            id: (data['id'] as num).toInt(),
+            lat: (data['lat'] as num).toDouble(),
+            lon: (data['lon'] as num).toDouble(),
+            name: data['name'] as String? ?? 'Unknown',
+            category: category,
+            rawCategory: data['rawCategory'] as String? ?? '',
+          );
+        }).toList();
+        
+        print('Fetched ${pois.length} POIs from backend server');
+      }
+    }
+    
+    // Fallback to Overpass if backend has no POIs or graph not loaded
+    if (pois.isEmpty) {
+      setState(() => _status = "Backend has no POIs, falling back to Overpass...");
+      pois = await _overpassService.fetchPois(centerLat, centerLon, radius);
+      print('Fetched ${pois.length} POIs from Overpass API');
+    }
     
     // Load user preferences and filter POIs
     UserPreferences prefs = UserPreferences();
     try {
       if (FirebaseAuth.instance.currentUser != null) {
         prefs = await _dbService.getPreferences();
+        // Load visited POI IDs for discovery mode
+        _visitedPoiIds = await _dbService.getVisitedPoiIds();
       }
     } catch (e) {
       print('Could not load preferences: $e');
@@ -130,20 +184,25 @@ class _MapTestScreenState extends State<MapTestScreen> {
     print('=================');
     
     // Snap area POIs to nearest walkable path if graph is loaded
-    List<Marker> markers = [];
-    for (var poi in filteredPois) {
-      LatLng displayPoint = LatLng(poi.lat, poi.lon);
-      
-      // If graph is loaded, try to snap to nearest walkable node
-      if (_isGraphReady) {
-        final snappedPoint = await _nativeService.getNearestNode(poi.lat, poi.lon);
-        if (snappedPoint != null) {
-          displayPoint = snappedPoint;
+    // Use BATCH API to reduce N calls to 1 call
+    List<LatLng> displayPoints = filteredPois.map((p) => LatLng(p.lat, p.lon)).toList();
+    
+    if (_isGraphReady && filteredPois.isNotEmpty) {
+      setState(() => _status = "Snapping ${filteredPois.length} POIs to walkable paths...");
+      final snappedPoints = await _routeApiService.getNearestNodesBatch(displayPoints);
+      for (int i = 0; i < displayPoints.length && i < snappedPoints.length; i++) {
+        if (snappedPoints[i] != null) {
+          displayPoints[i] = snappedPoints[i]!;
         }
       }
-      
+    }
+    
+    // Build markers with snapped positions
+    List<Marker> markers = [];
+    for (int i = 0; i < filteredPois.length; i++) {
+      final poi = filteredPois[i];
       markers.add(Marker(
-        point: displayPoint,
+        point: displayPoints[i],
         width: 40,
         height: 40,
         child: GestureDetector(
@@ -156,6 +215,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
     setState(() {
       _markers = markers;
       _status = "Found ${filteredPois.length} POIs (${pois.length} total, filtered by preferences)";
+      _currentPois = filteredPois; // Store for route optimization
     });
   }
   
@@ -170,6 +230,21 @@ class _MapTestScreenState extends State<MapTestScreen> {
       case PoiCategory.nature: return Colors.teal;
       case PoiCategory.beach: return Colors.cyan;
       case PoiCategory.other: return Colors.red;
+    }
+  }
+  
+  /// Map backend category string to PoiCategory enum
+  PoiCategory _mapBackendCategory(String category) {
+    switch (category.toLowerCase()) {
+      case 'park': return PoiCategory.park;
+      case 'museum': return PoiCategory.museum;
+      case 'viewpoint': return PoiCategory.viewpoint;
+      case 'cafe': return PoiCategory.cafe;
+      case 'restaurant': return PoiCategory.restaurant;
+      case 'monument': return PoiCategory.monument;
+      case 'nature': return PoiCategory.nature;
+      case 'beach': return PoiCategory.beach;
+      default: return PoiCategory.other;
     }
   }
 
@@ -227,7 +302,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
     });
 
     try {
-      List<LatLng> routePoints = await _nativeService.getRoute(start, end);
+      List<LatLng> routePoints = await _routeApiService.getRoute(start, end);
       
       if (routePoints.isNotEmpty) {
         setState(() {
@@ -263,16 +338,16 @@ class _MapTestScreenState extends State<MapTestScreen> {
     LatLng end = _selectedEnd!;
     
     try {
-      List<LatLng> routePoints = await _nativeService.getRoute(start, end);
+      List<LatLng> routePoints = await _routeApiService.getRoute(start, end);
       
       if (routePoints.length >= 2) {
         setState(() {
           _status = "Route Found (${routePoints.length} points)";
           _currentRoutePoints = routePoints; // Store for saving
+          _polylines = [
+              Polyline(points: routePoints, strokeWidth: 4.0, color: Colors.blue)
+          ];
         });
-        _polylines = [
-            Polyline(points: routePoints, strokeWidth: 4.0, color: Colors.blue)
-        ];
       } else if (routePoints.isNotEmpty) {
          // Found only start point?
          setState(() => _status = "Route too short (points: ${routePoints.length}). Start/End snapped to same node?");
@@ -438,6 +513,248 @@ class _MapTestScreenState extends State<MapTestScreen> {
     }
   }
 
+  Future<void> _generateOptimizedRoute() async {
+    if (!_isGraphReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please load the graph first!")),
+      );
+      return;
+    }
+    
+    if (_currentPois.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fetch POIs first!")),
+      );
+      return;
+    }
+    
+    setState(() => _status = "Generating route options...");
+    
+    // Get target distance from preferences (default 5km = 5000m)
+    double targetDistanceMeters = 5000;
+    try {
+      if (FirebaseAuth.instance.currentUser != null) {
+        final prefs = await _dbService.getPreferences();
+        targetDistanceMeters = prefs.targetDistance * 1000;
+      }
+    } catch (e) {
+      print("Could not load preferences: $e");
+    }
+    
+    final startPoint = _mapController.camera.center;
+    double maxPoiDistance = targetDistanceMeters / 3;
+    
+    // Calculate distance for each POI
+    List<MapEntry<Poi, double>> allPoisWithDistance = _currentPois.map((poi) {
+      double dist = _calculateDistance(startPoint.latitude, startPoint.longitude, poi.lat, poi.lon);
+      return MapEntry(poi, dist);
+    }).where((e) => e.value <= maxPoiDistance && e.value >= 100)
+    .toList();
+    
+    // Generate 3 route variants
+    List<GeneratedRoute> routes = [];
+    
+    // Route A: Balanced - mix of all categories
+    var balancedPois = _selectBalancedPois(allPoisWithDistance, 10);
+    var routeA = await _generateSingleRoute(
+      id: 'A',
+      name: 'Balanced',
+      description: 'Mix of all POI types',
+      pois: balancedPois,
+      start: startPoint,
+      targetDistance: targetDistanceMeters,
+    );
+    if (routeA != null) routes.add(routeA);
+    
+    // Route B: Discovery - prioritize unvisited POIs
+    var discoveryPois = _selectDiscoveryPois(allPoisWithDistance, 10);
+    var routeB = await _generateSingleRoute(
+      id: 'B',
+      name: 'Discovery',
+      description: 'Explore new places',
+      pois: discoveryPois,
+      start: startPoint,
+      targetDistance: targetDistanceMeters,
+    );
+    if (routeB != null) routes.add(routeB);
+    
+    // Route C: Scenic - prioritize parks and nature
+    var scenicPois = _selectScenicPois(allPoisWithDistance, 10);
+    var routeC = await _generateSingleRoute(
+      id: 'C',
+      name: 'Scenic',
+      description: 'Parks and nature',
+      pois: scenicPois,
+      start: startPoint,
+      targetDistance: targetDistanceMeters,
+    );
+    if (routeC != null) routes.add(routeC);
+    
+    if (routes.isEmpty) {
+      setState(() => _status = "No routes found");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Could not generate any routes")),
+      );
+      return;
+    }
+    
+    setState(() {
+      _routeOptions = routes;
+      _selectedRoute = routes.first;
+      _showRouteSelector = true;
+      _status = "Generated ${routes.length} route options";
+      // Show first route on map
+      _displayRoute(_selectedRoute!);
+    });
+  }
+  
+  List<Poi> _selectBalancedPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
+    // Group by category and take from each
+    Map<PoiCategory, List<Poi>> byCategory = {};
+    for (var e in poisWithDistance) {
+      byCategory.putIfAbsent(e.key.category, () => []).add(e.key);
+    }
+    
+    List<Poi> selected = [];
+    int perCategory = (maxCount / byCategory.length).ceil();
+    for (var pois in byCategory.values) {
+      selected.addAll(pois.take(perCategory));
+    }
+    return selected.take(maxCount).toList();
+  }
+  
+  List<Poi> _selectDiscoveryPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
+    // Prioritize unvisited POIs
+    var unvisited = poisWithDistance.where(
+      (e) => !_visitedPoiIds.contains(e.key.id.toString())
+    ).toList();
+    var visited = poisWithDistance.where(
+      (e) => _visitedPoiIds.contains(e.key.id.toString())
+    ).toList();
+    
+    List<Poi> selected = [];
+    selected.addAll(unvisited.map((e) => e.key));
+    selected.addAll(visited.map((e) => e.key));
+    return selected.take(maxCount).toList();
+  }
+  
+  List<Poi> _selectScenicPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
+    // Prioritize parks, nature, viewpoints, beach
+    var scenic = poisWithDistance.where((e) => 
+      e.key.category == PoiCategory.park ||
+      e.key.category == PoiCategory.nature ||
+      e.key.category == PoiCategory.viewpoint ||
+      e.key.category == PoiCategory.beach
+    ).toList();
+    var others = poisWithDistance.where((e) => 
+      e.key.category != PoiCategory.park &&
+      e.key.category != PoiCategory.nature &&
+      e.key.category != PoiCategory.viewpoint &&
+      e.key.category != PoiCategory.beach
+    ).toList();
+    
+    List<Poi> selected = [];
+    selected.addAll(scenic.map((e) => e.key));
+    selected.addAll(others.map((e) => e.key));
+    return selected.take(maxCount).toList();
+  }
+  
+  Future<GeneratedRoute?> _generateSingleRoute({
+    required String id,
+    required String name,
+    required String description,
+    required List<Poi> pois,
+    required LatLng start,
+    required double targetDistance,
+  }) async {
+    if (pois.isEmpty) return null;
+    
+    try {
+      List<LatLng> poiCoords = pois.map((poi) => LatLng(poi.lat, poi.lon)).toList();
+      
+      final result = await _routeApiService.optimizeRoute(
+        start: start,
+        pois: poiCoords,
+        targetDistanceMeters: targetDistance,
+      );
+      
+      List<LatLng> route = result.route;
+      if (route.isEmpty) return null;
+      
+      // Calculate distance
+      double totalDistance = 0;
+      for (int i = 0; i < route.length - 1; i++) {
+        totalDistance += _calculateDistance(
+          route[i].latitude, route[i].longitude,
+          route[i + 1].latitude, route[i + 1].longitude,
+        );
+      }
+      
+      return GeneratedRoute(
+        id: id,
+        name: name,
+        description: description,
+        points: route,
+        distanceKm: totalDistance / 1000,
+        pois: pois,
+      );
+    } catch (e) {
+      print("Error generating route $id: $e");
+      return null;
+    }
+  }
+  
+  void _displayRoute(GeneratedRoute route) {
+    setState(() {
+      _currentRoutePoints = route.points;
+      _polylines = [
+        Polyline(
+          points: route.points,
+          strokeWidth: 5.0,
+          color: route.id == 'A' ? Colors.blue : 
+                 route.id == 'B' ? Colors.green : Colors.orange,
+        ),
+      ];
+    });
+  }
+  
+  void _onRouteSelected(GeneratedRoute route) {
+    setState(() {
+      _selectedRoute = route;
+      _displayRoute(route);
+    });
+  }
+  
+  void _onStartRunFromSelector() {
+    if (_selectedRoute == null) return;
+    
+    setState(() => _showRouteSelector = false);
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RunTrackingScreen(
+          plannedRoute: _selectedRoute!.points,
+          pois: _selectedRoute!.pois,
+        ),
+      ),
+    );
+  }
+
+  void _startRun() {
+    // Navigate to run tracking screen
+    // Pass current route as planned route if available
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RunTrackingScreen(
+          plannedRoute: _currentRoutePoints.isNotEmpty ? _currentRoutePoints : null,
+          pois: _currentPois.isNotEmpty ? _currentPois : null,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -455,6 +772,17 @@ class _MapTestScreenState extends State<MapTestScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   Text("Status: $_status"),
+                  const SizedBox(width: 16),
+                  Row(
+                    children: [
+                      const Text('Discovery'),
+                      Switch(
+                        value: _discoveryMode,
+                        onChanged: (val) => setState(() => _discoveryMode = val),
+                        activeColor: Colors.green,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -506,12 +834,33 @@ class _MapTestScreenState extends State<MapTestScreen> {
                   child: const Text("Logs"),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300]),
                 ),
+                ElevatedButton(
+                  onPressed: _isGraphReady && _currentPois.isNotEmpty ? _generateOptimizedRoute : null,
+                  child: const Text("5. Optimize"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+                ),
+                ElevatedButton(
+                  onPressed: () => _startRun(),
+                  child: const Text("6. Run"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                ),
               ],
             ),
             ),
           ),
         ],
       ),
+      // Route selector overlay
+      bottomSheet: _showRouteSelector ? RouteSelector(
+        routes: _routeOptions,
+        selectedRoute: _selectedRoute,
+        onRouteSelected: _onRouteSelected,
+        onGenerateMore: () {
+          setState(() => _showRouteSelector = false);
+          _generateOptimizedRoute();
+        },
+        onStartRun: _onStartRunFromSelector,
+      ) : null,
     );
   }
 }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'preferences_screen.dart';
 import '../services/auth_service.dart';
+import '../services/database_service.dart';
+import '../models/trip.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -10,7 +14,7 @@ class ProfilePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2, // We have 2 tabs: Analysis and Profile Info
+      length: 3, // We have 3 tabs: Analysis, My Runs, Profile Info
       child: Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
@@ -29,16 +33,20 @@ class ProfilePage extends StatelessWidget {
             indicatorWeight: 3,
             tabs: [
               Tab(text: "Analysis"),
-              Tab(text: "Profile Info"),
+              Tab(text: "My Runs"),
+              Tab(text: "Profile"),
             ],
           ),
         ),
         body: const TabBarView(
           children: [
-            // Tab 1: The Analysis UI (from your screenshot)
+            // Tab 1: The Analysis UI
             _AnalysisTab(),
             
-            // Tab 2: Profile Placeholders
+            // Tab 2: My Runs/Saved Routes
+            _MyRunsTab(),
+            
+            // Tab 3: Profile Settings
             _ProfileInfoTab(),
           ],
         ),
@@ -250,7 +258,219 @@ class _AnalysisTab extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// TAB 2: PROFILE INFO
+// TAB 2: MY RUNS / SAVED ROUTES
+// ---------------------------------------------------------------------------
+class _MyRunsTab extends StatefulWidget {
+  const _MyRunsTab();
+
+  @override
+  State<_MyRunsTab> createState() => _MyRunsTabState();
+}
+
+class _MyRunsTabState extends State<_MyRunsTab> {
+  final DatabaseService _dbService = DatabaseService();
+  List<Trip> _trips = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTrips();
+  }
+
+  Future<void> _loadTrips() async {
+    try {
+      final trips = await _dbService.getTrips();
+      setState(() {
+        _trips = trips;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      print('Error loading trips: $e');
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    int hours = seconds ~/ 3600;
+    int minutes = (seconds % 3600) ~/ 60;
+    int secs = seconds % 60;
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    }
+    return '${minutes}m ${secs}s';
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_trips.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.directions_run, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              'No runs yet',
+              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Start a run to see it here!',
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadTrips,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _trips.length,
+        itemBuilder: (context, index) {
+          final trip = _trips[index];
+          return _buildTripCard(trip);
+        },
+      ),
+    );
+  }
+
+  Widget _buildTripCard(Trip trip) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Mini map preview
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: SizedBox(
+              height: 150,
+              child: trip.routeCoords.isNotEmpty 
+                ? FlutterMap(
+                    options: MapOptions(
+                      initialCenter: trip.routeCoords.isNotEmpty 
+                          ? trip.routeCoords[trip.routeCoords.length ~/ 2]
+                          : trip.startPoint,
+                      initialZoom: 14,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.none,
+                      ),
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.example.running_app',
+                      ),
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: trip.routeCoords,
+                            strokeWidth: 4,
+                            color: Colors.green,
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Container(
+                    color: Colors.grey[200],
+                    child: Center(
+                      child: Icon(Icons.map, size: 48, color: Colors.grey[400]),
+                    ),
+                  ),
+            ),
+          ),
+          // Trip details
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDate(trip.createdAt),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${(trip.distance / 1000).toStringAsFixed(2)} km',
+                        style: TextStyle(
+                          color: Colors.green[700],
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _buildStatChip(Icons.timer, _formatDuration(trip.duration)),
+                    const SizedBox(width: 16),
+                    _buildStatChip(
+                      Icons.speed,
+                      trip.distance > 0 && trip.duration > 0
+                          ? '${((trip.duration / 60) / (trip.distance / 1000)).toStringAsFixed(1)} min/km'
+                          : '--',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatChip(IconData icon, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.grey[600]),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TAB 3: PROFILE INFO
 // ---------------------------------------------------------------------------
 class _ProfileInfoTab extends StatelessWidget {
   const _ProfileInfoTab();

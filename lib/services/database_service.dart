@@ -111,4 +111,71 @@ class DatabaseService {
     final snapshot = await _userDoc.collection('trips').count().get();
     return snapshot.count ?? 0;
   }
+
+  // ============ VISITED POIs & RATINGS ============
+
+  /// Mark a POI as visited (increments visit count or creates new record)
+  Future<void> markPoiVisited({
+    required String poiId,
+    required String poiName,
+    required String poiCategory,
+    required double lat,
+    required double lon,
+  }) async {
+    final docRef = _userDoc.collection('visitedPois').doc(poiId);
+    final doc = await docRef.get();
+    
+    if (doc.exists) {
+      // Increment visit count
+      await docRef.update({
+        'visitCount': FieldValue.increment(1),
+        'lastVisited': Timestamp.now(),
+      });
+    } else {
+      // Create new visited POI record
+      await docRef.set({
+        'poiName': poiName,
+        'poiCategory': poiCategory,
+        'lat': lat,
+        'lon': lon,
+        'visitCount': 1,
+        'lastVisited': Timestamp.now(),
+      });
+    }
+  }
+
+  /// Get all visited POI IDs for the user
+  Future<Set<String>> getVisitedPoiIds() async {
+    final snapshot = await _userDoc.collection('visitedPois').get();
+    return snapshot.docs.map((doc) => doc.id).toSet();
+  }
+
+  /// Rate a POI (1-5 stars)
+  Future<void> ratePoi(String poiId, int rating) async {
+    if (rating < 1 || rating > 5) return;
+    
+    final docRef = _userDoc.collection('visitedPois').doc(poiId);
+    await docRef.update({
+      'rating': rating,
+      'ratedAt': Timestamp.now(),
+    });
+  }
+
+  /// Get user's rating for a POI (null if not rated)
+  Future<int?> getPoiRating(String poiId) async {
+    final doc = await _userDoc.collection('visitedPois').doc(poiId).get();
+    if (doc.exists) {
+      return doc.data()?['rating'];
+    }
+    return null;
+  }
+
+  /// Get all visited POIs with their ratings
+  Future<List<Map<String, dynamic>>> getVisitedPoisWithRatings() async {
+    final snapshot = await _userDoc.collection('visitedPois').get();
+    return snapshot.docs.map((doc) => {
+      'poiId': doc.id,
+      ...doc.data(),
+    }).toList();
+  }
 }

@@ -122,13 +122,20 @@ class OverpassService {
 
   // Download raw OSM XML for a bounding box to a local file
   Future<String?> downloadMapData(double south, double west, double north, double east) async {
-    // Overpass QL for all nodes and ways (standard map data)
-    // (node(bbox);way(bbox);>;);out meta;
+    // Overpass QL for:
+    // 1. All ways (road network) 
+    // 2. POI nodes (amenity, tourism, leisure, natural, historic)
+    // The '>' recurses to get node refs for ways
     final String query = '''
       [out:xml][timeout:90];
       (
         way($south,$west,$north,$east);
         >;
+        node["amenity"]($south,$west,$north,$east);
+        node["tourism"]($south,$west,$north,$east);
+        node["leisure"]($south,$west,$north,$east);
+        node["natural"]($south,$west,$north,$east);
+        node["historic"]($south,$west,$north,$east);
       );
       out meta;
     ''';
