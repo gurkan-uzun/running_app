@@ -461,6 +461,7 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
                 _statWidget('TIME', _formatDuration(_elapsedTime)),
                 _statWidget('DISTANCE', '${(_totalDistance / 1000).toStringAsFixed(2)} km'),
                 _statWidget('PACE', _currentPace),
+                _statWidget('CALORIES', '${(_totalDistance / 1000 * 60).round()}'),
               ],
             ),
           ),

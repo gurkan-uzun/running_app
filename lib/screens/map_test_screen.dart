@@ -11,6 +11,7 @@ import 'package:running_app/models/poi.dart';
 import 'package:running_app/models/trip.dart';
 import 'package:running_app/models/user_preferences.dart';
 import 'package:running_app/models/generated_route.dart';
+import 'package:running_app/models/favorite_route.dart';
 import 'package:running_app/widgets/route_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -754,6 +755,68 @@ class _MapTestScreenState extends State<MapTestScreen> {
       ),
     );
   }
+  
+  Future<void> _onSaveFavorite(GeneratedRoute route) async {
+    // Prompt for route name
+    final controller = TextEditingController(text: '${route.name} Route');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save Route'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Route Name',
+            hintText: 'My favorite route',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    
+    if (name == null || name.isEmpty) return;
+    
+    try {
+      final favoriteRoute = FavoriteRoute(
+        name: name,
+        points: route.points,
+        distanceKm: route.distanceKm,
+        estimatedMinutes: route.estimatedTimeMinutes,
+        poiCount: route.pois.length,
+        routeType: route.name,
+      );
+      
+      await _dbService.saveFavoriteRoute(favoriteRoute);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved "$name" to favorites!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving route: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -860,6 +923,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
           _generateOptimizedRoute();
         },
         onStartRun: _onStartRunFromSelector,
+        onSaveFavorite: _onSaveFavorite,
       ) : null,
     );
   }

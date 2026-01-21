@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_preferences.dart';
 import '../models/trip.dart';
+import '../models/favorite_route.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -177,5 +178,34 @@ class DatabaseService {
       'poiId': doc.id,
       ...doc.data(),
     }).toList();
+  }
+
+  // ============ FAVORITE ROUTES ============
+
+  /// Save a route as favorite
+  Future<String> saveFavoriteRoute(FavoriteRoute route) async {
+    final docRef = await _userDoc.collection('favoriteRoutes').add(route.toFirestore());
+    return docRef.id;
+  }
+
+  /// Get all favorite routes
+  Future<List<FavoriteRoute>> getFavoriteRoutes() async {
+    final snapshot = await _userDoc
+        .collection('favoriteRoutes')
+        .orderBy('createdAt', descending: true)
+        .get();
+    return snapshot.docs.map((doc) => FavoriteRoute.fromFirestore(doc)).toList();
+  }
+
+  /// Delete a favorite route
+  Future<void> deleteFavoriteRoute(String routeId) async {
+    await _userDoc.collection('favoriteRoutes').doc(routeId).delete();
+  }
+
+  /// Increment times used for a favorite route
+  Future<void> incrementRouteUsage(String routeId) async {
+    await _userDoc.collection('favoriteRoutes').doc(routeId).update({
+      'timesUsed': FieldValue.increment(1),
+    });
   }
 }
