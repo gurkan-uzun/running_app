@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:running_app/screens/schedule_page.dart';
 import 'package:running_app/screens/profile_page.dart';
 import 'package:running_app/screens/social_page.dart';
 import 'package:running_app/screens/route_screen.dart';
@@ -17,7 +18,7 @@ class _HomePageState extends State<HomePage> {
   // This list defines which widget is shown for each tab
   final List<Widget> _pages = [
     const RouteScreen(), // Route generation (main feature)
-    const Center(child: Text("Schedule Page")), // Index 1: Placeholder
+    const SchedulePage(),
     const SocialPage(),
     const SavedPage(), // Saved runs and favorite routes
     const ProfilePage(), 

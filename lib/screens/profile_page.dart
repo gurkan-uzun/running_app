@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'preferences_screen.dart';
+import 'edit_profile_screen.dart';
 import '../services/auth_service.dart';
+import '../services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -49,11 +51,133 @@ class ProfilePage extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // TAB 1: ANALYSIS UI
 // ---------------------------------------------------------------------------
-class _AnalysisTab extends StatelessWidget {
+class _AnalysisTab extends StatefulWidget {
   const _AnalysisTab();
 
   @override
+  State<_AnalysisTab> createState() => _AnalysisTabState();
+}
+
+class _AnalysisTabState extends State<_AnalysisTab> {
+  final DatabaseService _dbService = DatabaseService();
+  bool _isLoading = true;
+  
+  // Stats
+  double _last28DaysDistance = 0;
+  double _last28DaysPace = 0;
+  String _distanceChange = "0%";
+  String _paceChange = "0%";
+  
+  // Chart Data
+  List<FlSpot> _weeklySpots = [];
+  double _maxChartY = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final trips = await _dbService.getTrips(limit: 100);
+      if (!mounted) return;
+
+      final now = DateTime.now();
+      final last28DaysStart = now.subtract(const Duration(days: 28));
+      final prev28DaysStart = last28DaysStart.subtract(const Duration(days: 28));
+
+      // 1. Calculate Period Stats
+      double currentDist = 0;
+      double prevDist = 0;
+      double currentDuration = 0;
+      double prevDuration = 0;
+
+      for (var trip in trips) {
+        if (trip.createdAt.isAfter(last28DaysStart)) {
+          currentDist += trip.distance / 1000.0; // km
+          currentDuration += trip.duration / 60.0; // min
+        } else if (trip.createdAt.isAfter(prev28DaysStart)) {
+          prevDist += trip.distance / 1000.0;
+          prevDuration += trip.duration / 60.0;
+        }
+      }
+
+      // 2. Calculate Comparison
+      // Distance
+      String distChange = "";
+      if (prevDist > 0) {
+        final change = ((currentDist - prevDist) / prevDist) * 100;
+        distChange = "${change >= 0 ? '+' : ''}${change.toStringAsFixed(0)}% month over month";
+      } else {
+        distChange = "No previous data";
+      }
+
+      // Pace (min/km)
+      double currentPace = currentDist > 0 ? currentDuration / currentDist : 0;
+      double prevPace = prevDist > 0 ? prevDuration / prevDist : 0;
+      
+      String paceChange = "";
+      if (prevPace > 0) {
+        final change = ((currentPace - prevPace) / prevPace) * 100;
+        paceChange = "${change >= 0 ? '+' : ''}${change.toStringAsFixed(0)}% month over month";
+      } else {
+        paceChange = "No previous data";
+      }
+
+      // 3. Weekly Chart Data (Last 7 days)
+      final weekStart = now.subtract(const Duration(days: 6)); // 7 days including today
+      Map<int, double> dailyDistances = {};
+      
+      // Initialize 0 for last 7 days
+      for (int i = 0; i < 7; i++) {
+        dailyDistances[i] = 0;
+      }
+
+      for (var trip in trips) {
+        final dayDiff = now.difference(trip.createdAt).inDays;
+        if (dayDiff < 7 && dayDiff >= 0) {
+          // Map index: 6 is today, 0 is 6 days ago (chart left to right)
+          final index = 6 - dayDiff; 
+          dailyDistances[index] = (dailyDistances[index] ?? 0) + (trip.distance / 1000.0);
+        }
+      }
+
+      List<FlSpot> spots = [];
+      double maxY = 0;
+      dailyDistances.forEach((key, value) {
+        spots.add(FlSpot(key.toDouble() + 1, value));
+        if (value > maxY) maxY = value;
+      });
+      
+      // Add padding to max Y
+      maxY = (maxY * 1.2).ceilToDouble();
+      if (maxY < 10) maxY = 10;
+
+      setState(() {
+        _last28DaysDistance = currentDist;
+        _last28DaysPace = currentPace;
+        _distanceChange = distChange;
+        _paceChange = paceChange;
+        _weeklySpots = spots;
+        _maxChartY = maxY;
+        _isLoading = false;
+      });
+
+    } catch (e) {
+      print("Error loading stats: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+
+
+  @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -63,24 +187,27 @@ class _AnalysisTab extends StatelessWidget {
             const SizedBox(height: 10),
             
             // 1. Top Stats Row
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    "Last 28 days",
-                    "19,03 km",
-                    "+20% month over month",
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _buildStatCard(
+                      "Last 28 days",
+                      "${_last28DaysDistance.toStringAsFixed(2)} km",
+                      _distanceChange,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard(
-                    "Last 28 days",
-                    "7,53’",
-                    "+33% month over month",
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildStatCard(
+                      "Avg Pace",
+                      "${_last28DaysPace.toStringAsFixed(2)} min/km",
+                      _paceChange,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
 
             const SizedBox(height: 24),
@@ -110,7 +237,9 @@ class _AnalysisTab extends StatelessWidget {
                   const SizedBox(height: 24),
                   SizedBox(
                     height: 200,
-                    child: LineChart(_mainData()),
+                    child: _weeklySpots.isEmpty 
+                      ? const Center(child: Text("No runs this week"))
+                      : LineChart(_mainData()),
                   ),
                 ],
               ),
@@ -123,6 +252,8 @@ class _AnalysisTab extends StatelessWidget {
   }
 
   Widget _buildStatCard(String title, String value, String subtitle) {
+    final isPositive = subtitle.startsWith('+');
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -144,7 +275,13 @@ class _AnalysisTab extends StatelessWidget {
           const SizedBox(height: 8),
           Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+          Text(
+            subtitle, 
+            style: TextStyle(
+              fontSize: 10, 
+              color: isPositive ? Colors.green : (subtitle.startsWith('No') ? Colors.grey : Colors.red)
+            )
+          ),
         ],
       ),
     );
@@ -156,7 +293,7 @@ class _AnalysisTab extends StatelessWidget {
       gridData: FlGridData(
         show: true,
         drawVerticalLine: false,
-        horizontalInterval: 5, // Lines every 5 units
+        horizontalInterval: _maxChartY / 5, // Dynamic interval
         getDrawingHorizontalLine: (value) => FlLine(
           color: Colors.grey[200],
           strokeWidth: 1,
@@ -173,56 +310,55 @@ class _AnalysisTab extends StatelessWidget {
             interval: 1,
             getTitlesWidget: (value, meta) {
               const style = TextStyle(color: Colors.grey, fontSize: 10);
+              // Calculate day name based on current day
+              // value 1 is 6 days ago, 7 is today
+              final now = DateTime.now();
+              final dayIndex = value.toInt() - 1; // 0 to 6
+              final date = now.subtract(Duration(days: 6 - dayIndex));
+              
               String text;
-              switch (value.toInt()) {
-                case 0: text = 'Nov'; break;
-                case 1: text = '1'; break;
-                case 2: text = '2'; break;
-                case 3: text = '3'; break;
-                case 4: text = '4'; break;
-                case 5: text = '5'; break;
-                case 6: text = '6'; break;
-                case 7: text = '7'; break;
-                default: return Container();
+              switch (date.weekday) {
+                case 1: text = 'Mon'; break;
+                case 2: text = 'Tue'; break;
+                case 3: text = 'Wed'; break;
+                case 4: text = 'Thu'; break;
+                case 5: text = 'Fri'; break;
+                case 6: text = 'Sat'; break;
+                case 7: text = 'Sun'; break;
+                default: text = '';
               }
-              return Text(text, style: style);
+              return Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(text, style: style),
+              );
             },
           ),
         ),
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: 5,
+            interval: _maxChartY / 5,
             reservedSize: 32,
             getTitlesWidget: (value, meta) {
-               if (value == 5) return const Text('5 km', style: TextStyle(color: Colors.grey, fontSize: 10));
-               if (value == 25) return const Text('25 km', style: TextStyle(color: Colors.grey, fontSize: 10));
-               return Text(value.toInt().toString(), style: const TextStyle(color: Colors.grey, fontSize: 10));
+              if (value == 0) return const SizedBox.shrink();
+              return Text(value.toInt().toString(), style: const TextStyle(color: Colors.grey, fontSize: 10));
             },
           ),
         ),
       ),
       borderData: FlBorderData(show: true, border: Border.all(color: Colors.grey[200]!)),
-      minX: 0,
+      minX: 1,
       maxX: 7,
       minY: 0,
-      maxY: 25,
+      maxY: _maxChartY,
       lineBarsData: [
         LineChartBarData(
-          spots: const [
-            FlSpot(1, 15),
-            FlSpot(2, 12),
-            FlSpot(3, 17),
-            FlSpot(4, 5),
-            FlSpot(5, 12),
-            FlSpot(6, 18),
-            FlSpot(7, 22),
-          ],
+          spots: _weeklySpots,
           isCurved: false, // Straight lines as per image
           color: const Color(0xFF4A6FFF), // Blueish color
           barWidth: 3,
           isStrokeCapRound: true,
-          dotData: const FlDotData(show: false),
+          dotData: const FlDotData(show: true),
         ),
       ],
     );
@@ -232,8 +368,35 @@ class _AnalysisTab extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // TAB 2: PROFILE INFO (renamed from TAB 4)
 // ---------------------------------------------------------------------------
-class _ProfileInfoTab extends StatelessWidget {
+class _ProfileInfoTab extends StatefulWidget {
   const _ProfileInfoTab();
+
+  @override
+  State<_ProfileInfoTab> createState() => _ProfileInfoTabState();
+}
+
+class _ProfileInfoTabState extends State<_ProfileInfoTab> {
+  String? _username;
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadUsername();
+  }
+  
+  Future<void> _loadUsername() async {
+    try {
+      final dbService = DatabaseService();
+      final profile = await dbService.getUserProfile();
+      if (mounted && profile != null) {
+        setState(() {
+          _username = profile['username'];
+        });
+      }
+    } catch (e) {
+      print('Error loading username: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -258,6 +421,14 @@ class _ProfileInfoTab extends StatelessWidget {
               displayName,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
+            if (_username != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '@$_username',
+                style: TextStyle(color: Colors.blue[600], fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+            ],
+            const SizedBox(height: 4),
             Text(
               email,
               style: const TextStyle(color: Colors.grey),
@@ -270,7 +441,12 @@ class _ProfileInfoTab extends StatelessWidget {
                 MaterialPageRoute(builder: (context) => const PreferencesScreen()),
               );
             }),
-            _buildProfileItem(context, Icons.person_outline, "Edit Profile"),
+            _buildProfileItem(context, Icons.person_outline, "Edit Profile", onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const EditProfileScreen()),
+              ).then((_) => _loadUsername()); // Refresh username after editing
+            }),
             _buildProfileItem(context, Icons.notifications_outlined, "Notifications"),
             _buildProfileItem(context, Icons.privacy_tip_outlined, "Privacy Policy"),
             _buildProfileItem(context, Icons.logout, "Log Out", isDestructive: true, onTap: () async {

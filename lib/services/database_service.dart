@@ -19,16 +19,284 @@ class DatabaseService {
   }
 
   /// Initialize user profile on first sign-in
-  Future<void> initializeUserProfile({String? displayName}) async {
+  Future<void> initializeUserProfile({String? displayName, String? username}) async {
     final doc = await _userDoc.get();
     if (!doc.exists) {
+      final finalUsername = username ?? 'runner_${_userId!.substring(0, 6)}';
+      
       await _userDoc.set({
         'displayName': displayName ?? _auth.currentUser?.displayName ?? 'Runner',
-        'email': _auth.currentUser?.email,
+        'username': finalUsername,
+        'photoUrl': _auth.currentUser?.photoURL,
+        'createdAt': FieldValue.serverTimestamp(),
+        'totalDistance': 0.0,
+        'runCount': 0,
+      });
+      
+      // Create public username entry for searchability
+      await _db.collection('usernames').doc(finalUsername.toLowerCase()).set({
+        'uid': _userId,
+        'username': finalUsername,
+        'displayName': displayName ?? _auth.currentUser?.displayName ?? 'Runner',
+        'photoUrl': _auth.currentUser?.photoURL,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      
       // Initialize default preferences
       await savePreferences(UserPreferences());
+    }
+  }
+  
+  /// Check if username is available
+  Future<bool> isUsernameAvailable(String username) async {
+    final doc = await _db.collection('usernames').doc(username.toLowerCase()).get();
+    return !doc.exists;
+  }
+
+
+  /// Get current user's profile data
+  Future<Map<String, dynamic>?> getUserProfile() async {
+    try {
+      final doc = await _userDoc.get();
+      if (doc.exists) {
+        return {'uid': _userId, ...doc.data() as Map<String, dynamic>};
+      }
+    } catch (e) {
+      print('Error getting user profile: $e');
+    }
+    return null;
+  }
+
+  /// Get any user's public profile by ID (from usernames collection)
+  Future<Map<String, dynamic>?> getUserProfileById(String userId) async {
+    try {
+      // Search usernames collection by uid field (public data)
+      final snapshot = await _db.collection('usernames')
+          .where('uid', isEqualTo: userId)
+          .limit(1)
+          .get();
+      
+      if (snapshot.docs.isNotEmpty) {
+        final data = snapshot.docs.first.data();
+        return {
+          'uid': userId,
+          'username': data['username'],
+          'displayName': data['displayName'],
+          'photoUrl': data['photoUrl'],
+          'totalDistance': data['totalDistance'] ?? 0.0,
+        };
+      }
+    } catch (e) {
+      print('Error getting profile: $e');
+    }
+    return null;
+  }
+
+  /// Update user profile fields
+  Future<void> updateUserProfile(Map<String, dynamic> updates) async {
+    await _userDoc.update(updates);
+  }
+
+  /// Update user stats (call after completing a run)
+  Future<void> updateUserStats(double distance) async {
+    await _userDoc.update({
+      'totalDistance': FieldValue.increment(distance),
+      'runCount': FieldValue.increment(1),
+    });
+  }
+
+  /// Search users by username (exact match on document ID)
+  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    if (query.isEmpty || query.length < 2) return [];
+    
+    final queryLower = query.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '');
+    List<Map<String, dynamic>> results = [];
+    
+    try {
+      // Try exact match first (document ID is the username)
+      final doc = await _db.collection('usernames').doc(queryLower).get();
+      
+      if (doc.exists) {
+        final data = doc.data()!;
+        final uid = data['uid'] as String?;
+        if (uid != null && uid != _userId) {
+          results.add({
+            'uid': uid,
+            'username': data['username'],
+            'displayName': data['displayName'],
+            'photoUrl': data['photoUrl'],
+          });
+        }
+      }
+    } catch (e) {
+      print('Error searching users: $e');
+    }
+    
+    return results;
+  }
+  
+  /// Create or update username entry in public collection (for existing users)
+  Future<void> createUsernameEntry(String username) async {
+    if (_userId == null) return;
+    
+    final profile = await getUserProfile();
+    final displayName = profile?['displayName'] ?? 'Runner';
+    final photoUrl = profile?['photoUrl'];
+    
+    await _db.collection('usernames').doc(username.toLowerCase()).set({
+      'uid': _userId,
+      'username': username,
+      'displayName': displayName,
+      'photoUrl': photoUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    
+    // Also update the user's profile with the username
+    await _userDoc.update({'username': username});
+  }
+
+  // ============ FRIENDS ============
+
+  /// Add a friend (one-way follow - only modifies current user's data)
+  Future<void> addFriend(String friendId) async {
+    if (friendId == _userId) return;
+    
+    // Add to current user's friends list only
+    await _userDoc.collection('friends').doc(friendId).set({
+      'addedAt': FieldValue.serverTimestamp(),
+      'status': 'active',
+    });
+  }
+
+  /// Remove a friend
+  Future<void> removeFriend(String friendId) async {
+    await _userDoc.collection('friends').doc(friendId).delete();
+  }
+
+  /// Get friend IDs
+  Future<List<String>> getFriendIds() async {
+    final snapshot = await _userDoc.collection('friends').get();
+    return snapshot.docs.map((doc) => doc.id).toList();
+  }
+
+  /// Get friends with their profile data
+  Future<List<Map<String, dynamic>>> getFriends() async {
+    final friendIds = await getFriendIds();
+    List<Map<String, dynamic>> friends = [];
+    
+    for (var friendId in friendIds) {
+      final profile = await getUserProfileById(friendId);
+      if (profile != null) friends.add(profile);
+    }
+    
+    return friends;
+  }
+
+  /// Check if user is a friend
+  Future<bool> isFriend(String userId) async {
+    final doc = await _userDoc.collection('friends').doc(userId).get();
+    return doc.exists;
+  }
+
+  // ============ ACTIVITY FEED ============
+
+  /// Get recent activities from friends
+  Future<List<Map<String, dynamic>>> getFriendActivities({int limit = 20}) async {
+    final friendIds = await getFriendIds();
+    if (friendIds.isEmpty) return [];
+    
+    List<Map<String, dynamic>> activities = [];
+    
+    for (var friendId in friendIds) {
+      try {
+        final trips = await _db.collection('users').doc(friendId)
+            .collection('trips')
+            .orderBy('createdAt', descending: true)
+            .limit(5)
+            .get();
+        
+        final profile = await getUserProfileById(friendId);
+        
+        for (var doc in trips.docs) {
+          activities.add({
+            'tripId': doc.id,
+            'userId': friendId,
+            'userName': profile?['displayName'] ?? 'Unknown',
+            'userPhoto': profile?['photoUrl'],
+            ...doc.data(),
+          });
+        }
+      } catch (e) {
+        print('Error loading trips for $friendId: $e');
+      }
+    }
+    
+    // Sort by date
+    activities.sort((a, b) {
+      final aDate = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final bDate = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      return bDate.compareTo(aDate);
+    });
+    
+    return activities.take(limit).toList();
+  }
+
+  // ============ LEADERBOARD ============
+
+  /// Get leaderboard (friends + self ranked by distance)
+  Future<List<Map<String, dynamic>>> getLeaderboard({String period = 'weekly'}) async {
+    final friendIds = await getFriendIds();
+    List<Map<String, dynamic>> leaderboard = [];
+    
+    // Add current user
+    final myProfile = await getUserProfile();
+    if (myProfile != null) {
+      final myDistance = await _getDistanceForPeriod(_userId!, period);
+      leaderboard.add({...myProfile, 'periodDistance': myDistance, 'isCurrentUser': true});
+    }
+    
+    // Add friends
+    for (var friendId in friendIds) {
+      final profile = await getUserProfileById(friendId);
+      if (profile != null) {
+        final distance = await _getDistanceForPeriod(friendId, period);
+        leaderboard.add({...profile, 'periodDistance': distance, 'isCurrentUser': false});
+      }
+    }
+    
+    // Sort by distance descending
+    leaderboard.sort((a, b) => (b['periodDistance'] as double).compareTo(a['periodDistance'] as double));
+    
+    // Add ranks
+    for (int i = 0; i < leaderboard.length; i++) {
+      leaderboard[i]['rank'] = i + 1;
+    }
+    
+    return leaderboard;
+  }
+
+  Future<double> _getDistanceForPeriod(String userId, String period) async {
+    DateTime startDate;
+    if (period == 'weekly') {
+      startDate = DateTime.now().subtract(const Duration(days: 7));
+    } else {
+      startDate = DateTime.now().subtract(const Duration(days: 30));
+    }
+    
+    try {
+      final snapshot = await _db.collection('users').doc(userId)
+          .collection('trips')
+          .where('createdAt', isGreaterThan: Timestamp.fromDate(startDate))
+          .get();
+      
+      double total = 0;
+      for (var doc in snapshot.docs) {
+        total += (doc.data()['distance'] ?? 0).toDouble();
+      }
+      return total;
+    } catch (e) {
+      print('Error getting distance for $userId: $e');
+      return 0.0;
     }
   }
 
@@ -207,5 +475,47 @@ class DatabaseService {
     await _userDoc.collection('favoriteRoutes').doc(routeId).update({
       'timesUsed': FieldValue.increment(1),
     });
+  }
+
+  // ============ SCHEDULED RUNS ============
+
+  /// Get all scheduled runs
+  Future<List<Map<String, dynamic>>> getScheduledRuns() async {
+    final snapshot = await _userDoc.collection('scheduled_runs')
+        .orderBy('date', descending: false)
+        .get();
+    
+    return snapshot.docs.map((doc) => {
+      'id': doc.id,
+      ...doc.data(),
+      'date': (doc.data()['date'] as Timestamp).toDate(),
+    }).toList();
+  }
+
+  /// Add a scheduled run
+  Future<void> addScheduledRun({
+    required DateTime date,
+    required double distance,
+    String? notes,
+  }) async {
+    await _userDoc.collection('scheduled_runs').add({
+      'date': Timestamp.fromDate(date),
+      'distance': distance,
+      'notes': notes ?? '',
+      'completed': false,
+      'createdAt': Timestamp.now(),
+    });
+  }
+
+  /// Toggle scheduled run completion status
+  Future<void> toggleScheduledRunStatus(String runId, bool completed) async {
+    await _userDoc.collection('scheduled_runs').doc(runId).update({
+      'completed': completed,
+    });
+  }
+
+  /// Delete a scheduled run
+  Future<void> deleteScheduledRun(String runId) async {
+    await _userDoc.collection('scheduled_runs').doc(runId).delete();
   }
 }

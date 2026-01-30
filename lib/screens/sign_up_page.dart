@@ -15,17 +15,37 @@ class _SignupPageState extends State<SignupPage> {
   bool _obscurePassword = true;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _authService = AuthService();
   final _dbService = DatabaseService();
+  String? _usernameError;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _usernameController.dispose();
     super.dispose();
   }
 
   Future<void> _signUpWithEmail() async {
+    final username = _usernameController.text.trim().toLowerCase();
+    
+    if (username.isEmpty) {
+      _showError('Please enter a username');
+      return;
+    }
+    
+    if (username.length < 3) {
+      _showError('Username must be at least 3 characters');
+      return;
+    }
+    
+    if (!RegExp(r'^[a-z0-9_]+$').hasMatch(username)) {
+      _showError('Username can only contain letters, numbers, and underscores');
+      return;
+    }
+    
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       _showError('Please enter email and password');
       return;
@@ -37,13 +57,22 @@ class _SignupPageState extends State<SignupPage> {
     }
 
     setState(() => _isLoading = true);
+    
     try {
+      // Check username availability before creating account
+      final isAvailable = await _dbService.isUsernameAvailable(username);
+      if (!isAvailable) {
+        _showError('Username is already taken');
+        setState(() => _isLoading = false);
+        return;
+      }
+      
       await _authService.signUpWithEmail(
         _emailController.text.trim(),
         _passwordController.text,
       );
-      // Initialize user profile
-      await _dbService.initializeUserProfile();
+      // Initialize user profile with username
+      await _dbService.initializeUserProfile(username: username);
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/HomePage');
       }
@@ -121,7 +150,7 @@ class _SignupPageState extends State<SignupPage> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  "Enter your email to sign up for this app",
+                  "Enter your details to sign up",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
@@ -130,6 +159,31 @@ class _SignupPageState extends State<SignupPage> {
                 ),
 
                 const SizedBox(height: 20),
+
+                // Username Input Field
+                TextField(
+                  controller: _usernameController,
+                  decoration: InputDecoration(
+                    hintText: 'username (e.g. runner_john)',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    prefixIcon: const Icon(Icons.alternate_email, color: Colors.grey),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.black, width: 1.5),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
 
                 // Email Input Field
                 TextField(

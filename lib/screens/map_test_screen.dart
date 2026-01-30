@@ -15,6 +15,7 @@ import 'package:running_app/models/favorite_route.dart';
 import 'package:running_app/widgets/route_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:running_app/services/location_service.dart';
 import 'run_tracking_screen.dart';
 
 class MapTestScreen extends StatefulWidget {
@@ -29,6 +30,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
   final OverpassService _overpassService = OverpassService();
   final RouteApiService _routeApiService = RouteApiService();
   final DatabaseService _dbService = DatabaseService();
+  final LocationService _locationService = LocationService();
   List<LatLng> _currentRoutePoints = [];
 
   List<Marker> _markers = [];
@@ -40,12 +42,15 @@ class _MapTestScreenState extends State<MapTestScreen> {
   Set<String> _visitedPoiIds = {}; // Loaded from Firestore
   String _status = "Ready";
   
+  // User's current GPS location for route starting point
+  LatLng? _userLocation;
+  
   // Multi-route selection
   List<GeneratedRoute> _routeOptions = [];
   GeneratedRoute? _selectedRoute;
   bool _showRouteSelector = false;
 
-  // Kadikoy, Istanbul
+  // Kadikoy, Istanbul (default center)
   final LatLng _center = const LatLng(40.990, 29.020);
 
   Future<void> _downloadAndInit() async {
@@ -182,6 +187,13 @@ class _MapTestScreenState extends State<MapTestScreen> {
     List<Poi> filteredPois = pois.where((poi) => poi.matchesPreferences(prefs)).toList();
     
     print('Total: ${pois.length}, After filter: ${filteredPois.length}');
+    
+    // Limit POIs to prevent map clutter - keep well-distributed subset
+    const int maxDisplayPois = 25;
+    if (filteredPois.length > maxDisplayPois) {
+      filteredPois = _selectDistributedPois(filteredPois, bounds.center, maxDisplayPois);
+      print('Limited to $maxDisplayPois well-distributed POIs');
+    }
     print('=================');
     
     // Snap area POIs to nearest walkable path if graph is loaded
@@ -248,39 +260,184 @@ class _MapTestScreenState extends State<MapTestScreen> {
       default: return PoiCategory.other;
     }
   }
+  
+  /// Select well-distributed POIs to prevent clustering
+  /// Prioritizes category diversity and spatial spread
+  List<Poi> _selectDistributedPois(List<Poi> allPois, LatLng center, int maxCount) {
+    if (allPois.length <= maxCount) return allPois;
+    
+    // Group by category for diversity
+    Map<PoiCategory, List<Poi>> byCategory = {};
+    for (var poi in allPois) {
+      byCategory.putIfAbsent(poi.category, () => []).add(poi);
+    }
+    
+    // Sort POIs within each category by distance from center (farthest first for spread)
+    for (var category in byCategory.keys) {
+      byCategory[category]!.sort((a, b) {
+        double distA = _distanceBetween(center.latitude, center.longitude, a.lat, a.lon);
+        double distB = _distanceBetween(center.latitude, center.longitude, b.lat, b.lon);
+        return distA.compareTo(distB); // Closer first
+      });
+    }
+    
+    // Round-robin selection from categories
+    List<Poi> selected = [];
+    int categoryCount = byCategory.length;
+    int perCategory = (maxCount / categoryCount).ceil();
+    
+    for (var entry in byCategory.entries) {
+      var pois = entry.value;
+      int toTake = perCategory.clamp(1, pois.length);
+      selected.addAll(pois.take(toTake));
+    }
+    
+    return selected.take(maxCount).toList();
+  }
+  
+  double _distanceBetween(double lat1, double lon1, double lat2, double lon2) {
+    // Simplified distance calculation (Euclidean approximation)
+    double dLat = lat2 - lat1;
+    double dLon = lon2 - lon1;
+    return dLat * dLat + dLon * dLon;
+  }
 
   void _showPoiDetails(Poi poi) {
+    final bool isVisited = _visitedPoiIds.contains(poi.id.toString());
+    
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           width: double.infinity,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(poi.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text("Category: ${poi.category}"),
-              Text("Location: ${poi.lat.toStringAsFixed(4)}, ${poi.lon.toStringAsFixed(4)}"),
+              // Header with category icon
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _getCategoryColor(poi.category).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      _getCategoryIconData(poi.category),
+                      color: _getCategoryColor(poi.category),
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          poi.name,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          poi.categoryDisplayName,
+                          style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isVisited)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green[100],
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.green[700], size: 16),
+                          const SizedBox(width: 4),
+                          Text('Visited', style: TextStyle(color: Colors.green[700], fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 16),
+              // Rating if available
+              if (poi.rating > 0) ...[
+                Row(
+                  children: [
+                    ...List.generate(5, (index) {
+                      return Icon(
+                        index < poi.rating.round() ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 20,
+                      );
+                    }),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${poi.rating.toStringAsFixed(1)} rating',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              // Location info
+              Row(
+                children: [
+                  Icon(Icons.location_on, color: Colors.grey[500], size: 18),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${poi.lat.toStringAsFixed(5)}, ${poi.lon.toStringAsFixed(5)}',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // Action button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () {
-                    Navigator.pop(context); // Close sheet
+                    Navigator.pop(context);
                     _routeToPoi(poi);
                   },
                   icon: const Icon(Icons.directions_run),
-                  label: const Text("Route To Here"),
+                  label: const Text('Route To Here'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               ),
+              const SizedBox(height: 10),
             ],
           ),
         );
       },
     );
+  }
+  
+  IconData _getCategoryIconData(PoiCategory category) {
+    switch (category) {
+      case PoiCategory.park: return Icons.park;
+      case PoiCategory.museum: return Icons.museum;
+      case PoiCategory.viewpoint: return Icons.visibility;
+      case PoiCategory.cafe: return Icons.local_cafe;
+      case PoiCategory.restaurant: return Icons.restaurant;
+      case PoiCategory.monument: return Icons.account_balance;
+      case PoiCategory.nature: return Icons.nature;
+      case PoiCategory.beach: return Icons.beach_access;
+      case PoiCategory.other: return Icons.place;
+    }
   }
 
   Future<void> _routeToPoi(Poi targetPoi) async {
@@ -542,7 +699,21 @@ class _MapTestScreenState extends State<MapTestScreen> {
       print("Could not load preferences: $e");
     }
     
-    final startPoint = _mapController.camera.center;
+    // Get user's current GPS location for route start
+    // Falls back to map center if GPS unavailable
+    LatLng startPoint;
+    try {
+      final gpsLocation = await _locationService.getCurrentLocation();
+      if (gpsLocation == null) throw Exception('No GPS location');
+      startPoint = gpsLocation;
+      _userLocation = gpsLocation;
+      setState(() => _status = "Starting route from your location...");
+    } catch (e) {
+      // Fall back to map center if GPS fails
+      startPoint = _mapController.camera.center;
+      print("GPS unavailable, using map center: $e");
+    }
+    
     double maxPoiDistance = targetDistanceMeters / 3;
     
     // Calculate distance for each POI

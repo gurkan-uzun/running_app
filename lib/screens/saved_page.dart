@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import '../services/database_service.dart';
 import '../models/trip.dart';
 import '../models/favorite_route.dart';
+import 'run_tracking_screen.dart';
 
 /// Saved page showing run history and favorite routes
 class SavedPage extends StatelessWidget {
@@ -236,15 +237,7 @@ class _MyRunsTabState extends State<_MyRunsTab> {
                 ? GestureDetector(
                     onTap: () => _showFullRouteMap(trip),
                     child: FlutterMap(
-                      options: MapOptions(
-                        initialCameraFit: CameraFit.bounds(
-                          bounds: LatLngBounds.fromPoints(trip.routeCoords),
-                          padding: const EdgeInsets.all(20),
-                        ),
-                        interactionOptions: const InteractionOptions(
-                          flags: InteractiveFlag.none,
-                        ),
-                      ),
+                      options: _getSafeMapOptions(trip.routeCoords),
                       children: [
                         TileLayer(
                           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -335,6 +328,32 @@ class _MyRunsTabState extends State<_MyRunsTab> {
       ],
     );
   }
+  MapOptions _getSafeMapOptions(List<LatLng> points) {
+    if (points.length < 2) {
+      return MapOptions(
+        initialCenter: points.isNotEmpty ? points.first : const LatLng(0, 0),
+        initialZoom: 15,
+        interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+      );
+    }
+    
+    final bounds = LatLngBounds.fromPoints(points);
+    if (bounds.north == bounds.south && bounds.east == bounds.west) {
+       return MapOptions(
+        initialCenter: bounds.center,
+        initialZoom: 15,
+        interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+      );
+    }
+
+    return MapOptions(
+      initialCameraFit: CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.all(20),
+      ),
+      interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +416,18 @@ class _FavoriteRoutesTabState extends State<_FavoriteRoutesTab> {
     }
   }
   
+  /// Start a run with this saved route as the planned route
+  void _startRun(FavoriteRoute route) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RunTrackingScreen(
+          plannedRoute: route.points,
+        ),
+      ),
+    );
+  }
+  
   void _showFullFavoriteRouteMap(FavoriteRoute route) {
     showDialog(
       context: context,
@@ -430,12 +461,7 @@ class _FavoriteRoutesTabState extends State<_FavoriteRoutesTab> {
                 ),
                 Expanded(
                   child: FlutterMap(
-                    options: MapOptions(
-                      initialCameraFit: CameraFit.bounds(
-                        bounds: LatLngBounds.fromPoints(route.points),
-                        padding: const EdgeInsets.all(30),
-                      ),
-                    ),
+                    options: _getSafeMapOptions(route.points),
                     children: [
                       TileLayer(
                         urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -528,15 +554,7 @@ class _FavoriteRoutesTabState extends State<_FavoriteRoutesTab> {
                 ? GestureDetector(
                     onTap: () => _showFullFavoriteRouteMap(route),
                     child: FlutterMap(
-                      options: MapOptions(
-                        initialCameraFit: CameraFit.bounds(
-                          bounds: LatLngBounds.fromPoints(route.points),
-                          padding: const EdgeInsets.all(20),
-                        ),
-                        interactionOptions: const InteractionOptions(
-                          flags: InteractiveFlag.none,
-                        ),
-                      ),
+                      options: _getSafeMapOptions(route.points),
                       children: [
                         TileLayer(
                           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -591,8 +609,16 @@ class _FavoriteRoutesTabState extends State<_FavoriteRoutesTab> {
                     ],
                   ),
                 ),
+                // Start Run button
+                IconButton(
+                  icon: const Icon(Icons.play_circle_fill, color: Colors.green, size: 32),
+                  tooltip: 'Start Run',
+                  onPressed: () => _startRun(route),
+                ),
+                // Delete button
                 IconButton(
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  tooltip: 'Delete',
                   onPressed: () => _deleteRoute(route),
                 ),
               ],
@@ -613,6 +639,32 @@ class _FavoriteRoutesTabState extends State<_FavoriteRoutesTab> {
           style: TextStyle(fontSize: 12, color: Colors.grey[600]),
         ),
       ],
+    );
+  }
+  MapOptions _getSafeMapOptions(List<LatLng> points) {
+    if (points.length < 2) {
+      return MapOptions(
+        initialCenter: points.isNotEmpty ? points.first : const LatLng(0, 0),
+        initialZoom: 15,
+        interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+      );
+    }
+    
+    final bounds = LatLngBounds.fromPoints(points);
+    if (bounds.north == bounds.south && bounds.east == bounds.west) {
+       return MapOptions(
+        initialCenter: bounds.center,
+        initialZoom: 15,
+        interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+      );
+    }
+
+    return MapOptions(
+      initialCameraFit: CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.all(20),
+      ),
+      interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
     );
   }
 }
