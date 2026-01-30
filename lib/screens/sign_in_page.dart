@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../services/auth_service.dart';
+import '../services/database_service.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});
@@ -10,6 +12,64 @@ class SignInPage extends StatefulWidget {
 
 class _SignInPageState extends State<SignInPage> {
   bool _obscurePassword = true;
+  bool _isLoading = false;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _authService = AuthService();
+  final _dbService = DatabaseService();
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signInWithEmail() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showError('Please enter email and password');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _authService.signInWithEmail(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/HomePage');
+      }
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final result = await _authService.signInWithGoogle();
+      if (result != null) {
+        // Initialize user profile on first sign-in
+        await _dbService.initializeUserProfile();
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/HomePage');
+        }
+      }
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +107,7 @@ class _SignInPageState extends State<SignInPage> {
 
                 // Email Input
                 TextField(
+                  controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
                     hintText: 'email@domain.com',
@@ -71,6 +132,7 @@ class _SignInPageState extends State<SignInPage> {
 
                 // Password Input
                 TextField(
+                  controller: _passwordController,
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
                     hintText: 'Password',
@@ -127,11 +189,7 @@ class _SignInPageState extends State<SignInPage> {
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: () {
-                      // TODO: Implement Login Logic rn everyone can enter add auths 
-                      Navigator.pushReplacementNamed(context, '/HomePage'); 
-
-                    },
+                    onPressed: _isLoading ? null : _signInWithEmail,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
@@ -140,10 +198,19 @@ class _SignInPageState extends State<SignInPage> {
                       ),
                       elevation: 0,
                     ),
-                    child: const Text(
-                      "Sign In",
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Text(
+                            "Sign In",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ),
 
@@ -173,8 +240,7 @@ class _SignInPageState extends State<SignInPage> {
                     ),
                     TextButton(
                       onPressed: () {
-                         // This swaps the screen so you can't go "Back" to Sign In
-                         Navigator.pushReplacementNamed(context, '/SignUpPage'); 
+                        Navigator.pushReplacementNamed(context, '/SignUpPage');
                       },
                       child: const Text(
                         "Register",
@@ -190,21 +256,12 @@ class _SignInPageState extends State<SignInPage> {
 
                 const SizedBox(height: 12),
 
-                // Social Buttons (Reused Code)
+                // Google Sign In
                 _SocialButton(
                   icon: FontAwesomeIcons.google,
                   label: "Continue with Google",
                   iconColor: Colors.red,
-                  onTap: () {},
-                ),
-                
-                const SizedBox(height: 12),
-                
-                _SocialButton(
-                  icon: FontAwesomeIcons.apple,
-                  label: "Continue with Apple",
-                  iconColor: Colors.black,
-                  onTap: () {},
+                  onTap: _isLoading ? () {} : _signInWithGoogle,
                 ),
 
                 const SizedBox(height: 15),
@@ -217,7 +274,7 @@ class _SignInPageState extends State<SignInPage> {
   }
 }
 
-// Helper Widget (Copy this here or put in a separate common_widgets.dart file)
+// Helper Widget
 class _SocialButton extends StatelessWidget {
   final IconData icon;
   final String label;

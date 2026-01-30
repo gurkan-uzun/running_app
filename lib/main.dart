@@ -1,11 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:running_app/screens/HomePage.dart';
-import 'package:running_app/screens/ProfilePage.dart';
-import 'package:running_app/screens/SocialPage.dart';
-import './screens/SignUpPage.dart';
-import './screens/SignInPage.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'package:running_app/screens/home_page.dart';
+import 'package:running_app/screens/profile_page.dart';
+import 'package:running_app/screens/social_page.dart';
+import './screens/sign_up_page.dart';
+import './screens/sign_in_page.dart';
+import './screens/map_test_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    print('Firebase initialization error: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -15,13 +26,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      initialRoute: '/SignUpPage',
+      initialRoute: '/SignInPage',
       routes: {
         '/SignUpPage': (context) => SignupPage(),
         '/SignInPage': (context) => SignInPage(),
         '/HomePage': (context) => HomePage(),
         '/SocialPage': (context) => SocialPage(),
-        '/ProfilePage': (context) => ProfilePage()
+        '/ProfilePage': (context) => ProfilePage(),
+        '/MapTest': (context) => MapTestScreen(),
 
       },
       debugShowCheckedModeBanner: false,
