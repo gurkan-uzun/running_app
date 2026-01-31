@@ -43,6 +43,7 @@ class _RouteScreenState extends State<RouteScreen> {
   List<GeneratedRoute> _routeOptions = [];
   GeneratedRoute? _selectedRoute;
   bool _showRouteSelector = false;
+  bool _isCancelled = false;
 
   // Default center (can be updated by user location)
   LatLng _center = const LatLng(40.990, 29.020); // Kadikoy
@@ -327,7 +328,10 @@ class _RouteScreenState extends State<RouteScreen> {
       return;
     }
     
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _isCancelled = false;
+    });
     
     double targetDistanceMeters = 5000;
     try {
@@ -381,11 +385,13 @@ class _RouteScreenState extends State<RouteScreen> {
     var balancedPois = _selectBalancedPois(allPoisWithDistance, 10);
     var routeA = await _generateSingleRoute('A', 'Balanced', balancedPois, startPoint, targetDistanceMeters);
     if (routeA != null) routes.add(routeA);
+    if (_isCancelled) { setState(() => _isLoading = false); return; }
     
     // Route B: Discovery
     var discoveryPois = _selectDiscoveryPois(allPoisWithDistance, 10);
     var routeB = await _generateSingleRoute('B', 'Discovery', discoveryPois, startPoint, targetDistanceMeters);
     if (routeB != null) routes.add(routeB);
+    if (_isCancelled) { setState(() => _isLoading = false); return; }
     
     // Route C: Scenic
     var scenicPois = _selectScenicPois(allPoisWithDistance, 10);
@@ -627,14 +633,38 @@ class _RouteScreenState extends State<RouteScreen> {
             ),
           ),
           
-          // Loading indicator
+          // Loading indicator with cancel button
           if (_isLoading)
             Container(
-              color: Colors.black26,
-              child: const Center(child: CircularProgressIndicator()),
+              color: Colors.black54,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.white),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Generating routes...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() => _isCancelled = true);
+                      },
+                      icon: const Icon(Icons.close),
+                      label: const Text('Cancel'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           
-          // Generate routes button
+          // Generate routes button + Free Run
           if (!_showRouteSelector)
             Positioned(
               bottom: 30,
@@ -648,6 +678,21 @@ class _RouteScreenState extends State<RouteScreen> {
                     onPressed: _fetchPois,
                     backgroundColor: Colors.white,
                     child: const Icon(Icons.refresh, color: Colors.black),
+                  ),
+                  const SizedBox(width: 12),
+                  // Free Run button (no route)
+                  FloatingActionButton(
+                    heroTag: 'freeRun',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RunTrackingScreen(),
+                        ),
+                      );
+                    },
+                    backgroundColor: Colors.green,
+                    child: const Icon(Icons.directions_run, color: Colors.white),
                   ),
                   const Spacer(),
                   // Generate routes button
