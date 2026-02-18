@@ -15,62 +15,75 @@ class OverpassService {
   final String _overpassUrl = 'https://overpass-api.de/api/interpreter';
 
   Future<List<Poi>> fetchPois(double lat, double lon, double radius) async {
-    // Fetch both nodes and ways (areas) - many POIs like beaches/parks are areas
-    // Use 'out center' to get center point for ways
-    final String query = '''
-      [out:json][timeout:25];
-      (
-        node["amenity"](around:$radius,$lat,$lon);
-        node["tourism"](around:$radius,$lat,$lon);
-        node["leisure"](around:$radius,$lat,$lon);
-        node["natural"](around:$radius,$lat,$lon);
-        node["historic"](around:$radius,$lat,$lon);
-        way["leisure"~"park|garden|playground"](around:$radius,$lat,$lon);
-        way["natural"~"beach|wood|forest"](around:$radius,$lat,$lon);
-        way["tourism"~"museum|attraction"](around:$radius,$lat,$lon);
-      );
-      out center;
-    ''';
+    // Retry with exponential backoff, reducing radius on server errors
+    int maxRetries = 2;
+    double currentRadius = radius;
+    
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        final String query = '''
+          [out:json][timeout:25];
+          (
+            node["amenity"](around:$currentRadius,$lat,$lon);
+            node["tourism"](around:$currentRadius,$lat,$lon);
+            node["leisure"](around:$currentRadius,$lat,$lon);
+            node["natural"](around:$currentRadius,$lat,$lon);
+            node["historic"](around:$currentRadius,$lat,$lon);
+            way["leisure"~"park|garden|playground"](around:$currentRadius,$lat,$lon);
+            way["natural"~"beach|wood|forest"](around:$currentRadius,$lat,$lon);
+            way["tourism"~"museum|attraction"](around:$currentRadius,$lat,$lon);
+          );
+          out center;
+        ''';
 
-    try {
-      final response = await http.post(
-        Uri.parse(_overpassUrl),
-        body: {'data': query},
-      );
+        final response = await http.post(
+          Uri.parse(_overpassUrl),
+          body: {'data': query},
+        );
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        final List<dynamic> elements = data['elements'];
-        
-        return elements
-            .where((e) {
-              // Must have tags
-              if (e['tags'] == null) return false;
-              
-              // For nodes, require lat/lon
-              if (e['type'] == 'node') {
-                return e['lat'] != null && e['lon'] != null;
-              }
-              
-              // For ways, need center coordinates
-              if (e['type'] == 'way') {
-                return e['center'] != null;
-              }
-              
-              return false;
-            })
-            .map((e) => _elementToPoi(e))
-            .where((poi) => poi != null)
-            .cast<Poi>()
-            .toList();
-      } else {
-        print('Overpass API Error: ${response.statusCode}');
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(response.body);
+          final List<dynamic> elements = data['elements'];
+          
+          return elements
+              .where((e) {
+                if (e['tags'] == null) return false;
+                if (e['type'] == 'node') {
+                  return e['lat'] != null && e['lon'] != null;
+                }
+                if (e['type'] == 'way') {
+                  return e['center'] != null;
+                }
+                return false;
+              })
+              .map((e) => _elementToPoi(e))
+              .where((poi) => poi != null)
+              .cast<Poi>()
+              .toList();
+        } else if ((response.statusCode == 504 || response.statusCode == 429) 
+                   && attempt < maxRetries) {
+          // Server overloaded — wait and retry with smaller radius
+          print('Overpass ${response.statusCode}, retry ${attempt + 1} with radius ${(currentRadius * 0.7).toInt()}m');
+          await Future.delayed(Duration(seconds: 2 * (attempt + 1)));
+          currentRadius *= 0.7; // Reduce radius by 30%
+          continue;
+        } else {
+          print('Overpass API Error: ${response.statusCode}');
+          return [];
+        }
+      } catch (e) {
+        if (attempt < maxRetries) {
+          print('Overpass exception, retry ${attempt + 1}: $e');
+          await Future.delayed(Duration(seconds: 2 * (attempt + 1)));
+          currentRadius *= 0.7;
+          continue;
+        }
+        print('Exception fetching POIs: $e');
         return [];
       }
-    } catch (e) {
-      print('Exception fetching POIs: $e');
-      return [];
     }
+    
+    return [];
   }
   
   Poi? _elementToPoi(Map<String, dynamic> e) {

@@ -37,7 +37,7 @@ class _RouteScreenState extends State<RouteScreen> {
   
   bool _isGraphReady = false;
   bool _isLoading = false;
-  bool _discoveryMode = true;
+
   Set<String> _visitedPoiIds = {};
   
   List<GeneratedRoute> _routeOptions = [];
@@ -58,6 +58,18 @@ class _RouteScreenState extends State<RouteScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     
+    // Step 1: Get user's actual GPS location and center the map there
+    try {
+      final gpsLocation = await _locationService.getCurrentLocation();
+      if (gpsLocation != null && mounted) {
+        setState(() => _center = gpsLocation);
+        _mapController.move(gpsLocation, 15.0);
+      }
+    } catch (e) {
+      print('GPS unavailable, using default center: $e');
+    }
+    
+    // Step 2: Check backend health
     try {
       final health = await _routeApiService.healthCheck();
       if (!mounted) return;
@@ -66,7 +78,7 @@ class _RouteScreenState extends State<RouteScreen> {
           _isGraphReady = true;
           _isLoading = false;
         });
-        // Auto-fetch POIs after graph is ready
+        // Auto-fetch POIs after graph is ready (now around user's real location)
         _fetchPois();
       } else {
         setState(() => _isLoading = false);
@@ -87,15 +99,34 @@ class _RouteScreenState extends State<RouteScreen> {
     }
   }
 
-  Future<void> _fetchPois() async {
+  Future<void> _fetchPois({double? radiusMeters, LatLng? center}) async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
     
-    final bounds = _mapController.camera.visibleBounds;
-    double centerLat = bounds.center.latitude;
-    double centerLon = bounds.center.longitude;
+    double centerLat, centerLon;
+    double fetchRadius;
     
-    List<Poi> pois = await _overpassService.fetchPois(centerLat, centerLon, 1000);
+    if (center != null && radiusMeters != null) {
+      centerLat = center.latitude;
+      centerLon = center.longitude;
+      fetchRadius = radiusMeters;
+    } else {
+      // Calculate radius from visible map bounds
+      final bounds = _mapController.camera.visibleBounds;
+      centerLat = bounds.center.latitude;
+      centerLon = bounds.center.longitude;
+      // Approximate radius as half the diagonal of visible bounds
+      double latSpan = (bounds.north - bounds.south).abs();
+      double lonSpan = (bounds.east - bounds.west).abs();
+      // ~111km per degree lat, ~85km per degree lon at Istanbul latitude
+      double latMeters = latSpan * 111000;
+      double lonMeters = lonSpan * 85000;
+      fetchRadius = (math.sqrt(latMeters * latMeters + lonMeters * lonMeters) / 2)
+          .clamp(500, 2000); // Clamp to avoid Overpass timeouts
+    }
+    
+    print('Fetching POIs: center=($centerLat, $centerLon), radius=${fetchRadius.toStringAsFixed(0)}m');
+    List<Poi> pois = await _overpassService.fetchPois(centerLat, centerLon, fetchRadius);
     
     // Load preferences and filter
     UserPreferences prefs = UserPreferences();
@@ -116,11 +147,32 @@ class _RouteScreenState extends State<RouteScreen> {
       return true;
     }).toList();
     
-    // Limit POIs for display to prevent clutter
-    const int maxDisplayPois = 25;
+    // Select spatially distributed POIs for map display using minimum-distance spacing
+    // Each selected POI must be at least minSpacing meters from all others
+    const int maxDisplayPois = 100;
     List<Poi> displayPois = filteredPois;
     if (filteredPois.length > maxDisplayPois) {
-      displayPois = _selectDistributedPois(filteredPois, _mapController.camera.center, maxDisplayPois);
+      // Sort by quality: named non-other POIs first
+      List<Poi> sorted = List.from(filteredPois);
+      sorted.sort((a, b) {
+        int scoreA = (a.name != 'Unknown' ? 2 : 0) + (a.category != PoiCategory.other ? 1 : 0);
+        int scoreB = (b.name != 'Unknown' ? 2 : 0) + (b.category != PoiCategory.other ? 1 : 0);
+        return scoreB.compareTo(scoreA);
+      });
+      
+      // Greedy selection with minimum spacing
+      const double minSpacingMeters = 200;
+      List<Poi> spaced = [];
+      for (var poi in sorted) {
+        bool tooClose = spaced.any((selected) =>
+          _calculateDistance(poi.lat, poi.lon, selected.lat, selected.lon) < minSpacingMeters
+        );
+        if (!tooClose) {
+          spaced.add(poi);
+          if (spaced.length >= maxDisplayPois) break;
+        }
+      }
+      displayPois = spaced;
     }
     
     // Create markers for display
@@ -144,7 +196,7 @@ class _RouteScreenState extends State<RouteScreen> {
     if (!mounted) return;
     setState(() {
       _markers = markers;
-      _currentPois = filteredPois; // Keep full list for route generation
+      _currentPois = displayPois; // Route generation uses the displayed POIs
       _isLoading = false;
     });
   }
@@ -161,36 +213,6 @@ class _RouteScreenState extends State<RouteScreen> {
       case PoiCategory.beach: return Colors.cyan;
       case PoiCategory.other: return Colors.red;
     }
-  }
-  
-  /// Select well-distributed POIs for display
-  List<Poi> _selectDistributedPois(List<Poi> allPois, LatLng center, int maxCount) {
-    if (allPois.length <= maxCount) return allPois;
-    
-    // Group by category for diversity
-    Map<PoiCategory, List<Poi>> byCategory = {};
-    for (var poi in allPois) {
-      byCategory.putIfAbsent(poi.category, () => []).add(poi);
-    }
-    
-    // Sort POIs within each category by distance from center
-    for (var category in byCategory.keys) {
-      byCategory[category]!.sort((a, b) {
-        double distA = _distanceBetween(center.latitude, center.longitude, a.lat, a.lon);
-        double distB = _distanceBetween(center.latitude, center.longitude, b.lat, b.lon);
-        return distA.compareTo(distB);
-      });
-    }
-    
-    // Round-robin selection from categories
-    List<Poi> selected = [];
-    int perCategory = (maxCount / byCategory.length).ceil();
-    
-    for (var pois in byCategory.values) {
-      selected.addAll(pois.take(perCategory.clamp(1, pois.length)));
-    }
-    
-    return selected.take(maxCount).toList();
   }
   
   double _distanceBetween(double lat1, double lon1, double lat2, double lon2) {
@@ -356,7 +378,17 @@ class _RouteScreenState extends State<RouteScreen> {
       print("GPS unavailable, using map center: $e");
     }
     
-    double maxPoiDistance = targetDistanceMeters / 3;
+    // Use the POIs already displayed on the map (grid-distributed)
+    // No re-fetch — route should connect to visible POIs
+    
+    double maxPoiDistance = targetDistanceMeters / 2;
+    
+    // DEBUG: Log key values to diagnose POI filtering
+    print('=== ROUTE GENERATION DEBUG ===');
+    print('startPoint: ${startPoint.latitude}, ${startPoint.longitude}');
+    print('targetDistanceMeters: $targetDistanceMeters');
+    print('maxPoiDistance: $maxPoiDistance');
+    print('_currentPois count: ${_currentPois.length}');
     
     // Calculate distances for all POIs
     List<MapEntry<Poi, double>> allPoisWithDistance = _currentPois.map((poi) {
@@ -364,6 +396,17 @@ class _RouteScreenState extends State<RouteScreen> {
       return MapEntry(poi, dist);
     }).where((e) => e.value <= maxPoiDistance && e.value >= 50).toList();
     
+    // DEBUG: Log distances for first 5 POIs regardless of filter
+    print('--- All POI distances (first 10): ---');
+    int debugCount = 0;
+    for (var poi in _currentPois) {
+      double dist = _calculateDistance(startPoint.latitude, startPoint.longitude, poi.lat, poi.lon);
+      print('  POI "${poi.name}" (${poi.category}): ${dist.toStringAsFixed(1)}m');
+      if (++debugCount >= 10) break;
+    }
+    print('POIs after distance filter: ${allPoisWithDistance.length}');
+    print('=== END DEBUG ===');
+
     // If too few POIs, expand search radius
     if (allPoisWithDistance.length < 3) {
       allPoisWithDistance = _currentPois.map((poi) {
@@ -413,45 +456,75 @@ class _RouteScreenState extends State<RouteScreen> {
     });
   }
   
-  List<Poi> _selectBalancedPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
-    Map<PoiCategory, List<Poi>> byCategory = {};
-    for (var e in poisWithDistance) {
-      byCategory.putIfAbsent(e.key.category, () => []).add(e.key);
+  /// Pick POIs in round-robin from spatial sectors for even distribution
+  List<Poi> _selectFromSectors(List<MapEntry<Poi, double>> poisWithDistance, 
+      LatLng center, int maxCount, {bool Function(MapEntry<Poi, double>)? priorityFilter, bool preferFarthest = false}) {
+    const int numSectors = 8;
+    Map<int, List<MapEntry<Poi, double>>> sectors = {};
+    for (int i = 0; i < numSectors; i++) {
+      sectors[i] = [];
     }
+    
+    for (var entry in poisWithDistance) {
+      double dx = entry.key.lon - center.longitude;
+      double dy = entry.key.lat - center.latitude;
+      double angle = math.atan2(dy, dx);
+      int sector = ((angle + math.pi) / (2 * math.pi) * numSectors).floor() % numSectors;
+      sectors[sector]!.add(entry);
+    }
+    
+    // Sort within each sector
+    for (var sector in sectors.values) {
+      if (priorityFilter != null) {
+        var priority = sector.where(priorityFilter).toList();
+        var rest = sector.where((e) => !priorityFilter(e)).toList();
+        priority.sort((a, b) => a.value.compareTo(b.value));
+        rest.sort((a, b) => a.value.compareTo(b.value));
+        sector.clear();
+        sector.addAll(priority);
+        sector.addAll(rest);
+      } else if (preferFarthest) {
+        sector.sort((a, b) => b.value.compareTo(a.value)); // farthest first
+      } else {
+        sector.sort((a, b) => a.value.compareTo(b.value)); // closest first
+      }
+    }
+    
+    // Round-robin pick from each sector
     List<Poi> selected = [];
-    int perCategory = (maxCount / byCategory.length).ceil();
-    for (var pois in byCategory.values) {
-      selected.addAll(pois.take(perCategory));
+    int maxPerSector = (maxCount / numSectors).ceil() + 1;
+    for (int round = 0; round < maxPerSector && selected.length < maxCount; round++) {
+      for (int s = 0; s < numSectors && selected.length < maxCount; s++) {
+        if (round < sectors[s]!.length) {
+          selected.add(sectors[s]![round].key);
+        }
+      }
     }
-    return selected.take(maxCount).toList();
+    
+    return selected;
+  }
+
+  List<Poi> _selectBalancedPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
+    // Balanced: closest POI per sector (even spread, nearby)
+    return _selectFromSectors(poisWithDistance, _center, maxCount);
   }
   
   List<Poi> _selectDiscoveryPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
-    var unvisited = poisWithDistance.where((e) => !_visitedPoiIds.contains(e.key.id.toString())).toList();
-    var visited = poisWithDistance.where((e) => _visitedPoiIds.contains(e.key.id.toString())).toList();
-    List<Poi> selected = [];
-    selected.addAll(unvisited.map((e) => e.key));
-    selected.addAll(visited.map((e) => e.key));
-    return selected.take(maxCount).toList();
+    // Discovery: FARTHEST POI per sector (explore outward, different from balanced)
+    return _selectFromSectors(poisWithDistance, _center, maxCount, preferFarthest: true);
   }
   
   List<Poi> _selectScenicPois(List<MapEntry<Poi, double>> poisWithDistance, int maxCount) {
-    var scenic = poisWithDistance.where((e) => 
-      e.key.category == PoiCategory.park ||
-      e.key.category == PoiCategory.nature ||
-      e.key.category == PoiCategory.viewpoint ||
-      e.key.category == PoiCategory.beach
-    ).toList();
-    var others = poisWithDistance.where((e) => 
-      e.key.category != PoiCategory.park &&
-      e.key.category != PoiCategory.nature &&
-      e.key.category != PoiCategory.viewpoint &&
-      e.key.category != PoiCategory.beach
-    ).toList();
-    List<Poi> selected = [];
-    selected.addAll(scenic.map((e) => e.key));
-    selected.addAll(others.map((e) => e.key));
-    return selected.take(maxCount).toList();
+    // Scenic: only scenic categories, fall back to others if not enough
+    const scenicCategories = {PoiCategory.park, PoiCategory.nature, PoiCategory.viewpoint, PoiCategory.beach};
+    var scenicOnly = poisWithDistance.where((e) => scenicCategories.contains(e.key.category)).toList();
+    if (scenicOnly.length >= maxCount) {
+      return _selectFromSectors(scenicOnly, _center, maxCount);
+    }
+    // Not enough scenic POIs — supplement with others
+    return _selectFromSectors(poisWithDistance, _center, maxCount,
+      priorityFilter: (e) => scenicCategories.contains(e.key.category),
+    );
   }
   
   Future<GeneratedRoute?> _generateSingleRoute(String id, String name, List<Poi> pois, LatLng start, double targetDistance) async {
@@ -571,6 +644,15 @@ class _RouteScreenState extends State<RouteScreen> {
             options: MapOptions(
               initialCenter: _center,
               initialZoom: 15.0,
+              onTap: (tapPosition, point) {
+                // Dismiss route selector when tapping the map
+                if (_showRouteSelector) {
+                  setState(() {
+                    _showRouteSelector = false;
+                    _polylines = [];
+                  });
+                }
+              },
               onMapEvent: (event) {
                 // Could auto-fetch POIs on map move
               },
@@ -607,27 +689,7 @@ class _RouteScreenState extends State<RouteScreen> {
                       ],
                     ),
                   ),
-                  const Spacer(),
-                  // Discovery mode toggle
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8)],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('Discovery', style: TextStyle(fontSize: 12)),
-                        Switch(
-                          value: _discoveryMode,
-                          onChanged: (v) => setState(() => _discoveryMode = v),
-                          activeColor: Colors.green,
-                        ),
-                      ],
-                    ),
-                  ),
+
                 ],
               ),
             ),
