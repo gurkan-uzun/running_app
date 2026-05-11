@@ -68,15 +68,19 @@ rbenv install 3.3.0
 Open your terminal, navigate to the cloned project folder, and run these commands in order:
 
 ```bash
+
 # 1. Download the project's exact Flutter SDK (3.41.6)
 fvm install
 
-# 2. Get the exact Dart packages
+# 2. Download the iOS engine artifacts (Crucial to prevent Pod errors)
+fvm flutter precache --ios
+
+# 3. Get the exact Dart packages
 fvm flutter pub get
 
-# 3. Setup iOS dependencies (Mac/iOS only)
+# 4. Setup iOS dependencies (Mac/iOS only)
 cd ios
-gem install bundler  # Installs the package manager
+gem install bundler  # Installs the package manager (if you don't have it)
 bundle install       # Installs the exact CocoaPods version for this project
 bundle exec pod install # Installs the iOS SDKs
 cd ..
