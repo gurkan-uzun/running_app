@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -143,7 +142,9 @@ class _RouteScreenState extends State<RouteScreen> {
     List<Poi> filteredPois = pois.where((poi) {
       if (prefs.avoidCategories.contains(poi.category)) return false;
       if (prefs.preferredCategories.isNotEmpty && 
-          !prefs.preferredCategories.contains(poi.category)) return false;
+          !prefs.preferredCategories.contains(poi.category)) {
+        return false;
+      }
       return true;
     }).toList();
     

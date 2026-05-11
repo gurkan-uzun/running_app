@@ -47,8 +47,8 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
   String _navigationInstruction = '';
   
   // POI visit tracking
-  Set<int> _visitedPoiIds = {}; // POIs visited during this run
-  List<Poi> _poisToRate = []; // POIs to rate after run completes
+  final Set<int> _visitedPoiIds = {}; // POIs visited during this run
+  final List<Poi> _poisToRate = []; // POIs to rate after run completes
   static const double _poiProximityThreshold = 50.0; // meters
   
   @override

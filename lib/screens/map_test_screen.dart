@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -1013,7 +1012,7 @@ class _MapTestScreenState extends State<MapTestScreen> {
                       Switch(
                         value: _discoveryMode,
                         onChanged: (val) => setState(() => _discoveryMode = val),
-                        activeColor: Colors.green,
+                        activeThumbColor: Colors.green,
                       ),
                     ],
                   ),
@@ -1060,23 +1059,23 @@ class _MapTestScreenState extends State<MapTestScreen> {
                 ),
                 ElevatedButton(
                   onPressed: _currentRoutePoints.isNotEmpty ? _saveTrip : null,
-                  child: const Text("4. Save"),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  child: const Text("4. Save"),
                 ),
                 ElevatedButton(
                   onPressed: _showNativeLogs,
-                  child: const Text("Logs"),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300]),
+                  child: const Text("Logs"),
                 ),
                 ElevatedButton(
                   onPressed: _isGraphReady && _currentPois.isNotEmpty ? _generateOptimizedRoute : null,
-                  child: const Text("5. Optimize"),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+                  child: const Text("5. Optimize"),
                 ),
                 ElevatedButton(
                   onPressed: () => _startRun(),
-                  child: const Text("6. Run"),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                  child: const Text("6. Run"),
                 ),
               ],
             ),

@@ -2,10 +2,10 @@
 /// Change the baseUrl here when deploying to production
 class ApiConfig {
   // Development - local server
-  static const String baseUrl = 'http://localhost:8080';
+  // static const String baseUrl = 'http://localhost:8080';
   
   // Production - change to your server URL
-  // static const String baseUrl = 'http://192.168.1.34:8080';
+  static const String baseUrl = 'http://34.123.19.47:8080';
   
   // Endpoints
   static const String health = '/api/health';

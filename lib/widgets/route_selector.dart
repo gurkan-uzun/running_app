@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/generated_route.dart';
-import '../models/user_preferences.dart';
 
 /// Widget to display and select from multiple route options
 class RouteSelector extends StatelessWidget {

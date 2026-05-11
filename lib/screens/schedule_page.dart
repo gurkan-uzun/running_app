@@ -282,7 +282,7 @@ class _SchedulePageState extends State<SchedulePage> {
                   }
                   
                   return cardContent;
-                }).toList(),
+                }),
                 if (_getEventsForDay(_selectedDay ?? DateTime.now()).isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 32),

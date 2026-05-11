@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -473,8 +472,9 @@ class _SocialFeedTabState extends State<_SocialFeedTab> {
     final distance = (entry['periodDistance'] ?? 0).toDouble();
     
     Color? rankColor;
-    if (rank == 1) rankColor = Colors.amber;
-    else if (rank == 2) rankColor = Colors.grey[400];
+    if (rank == 1) {
+      rankColor = Colors.amber;
+    } else if (rank == 2) rankColor = Colors.grey[400];
     else if (rank == 3) rankColor = Colors.orange[300];
 
     return Container(
@@ -662,7 +662,7 @@ class _SocialFeedTabState extends State<_SocialFeedTab> {
   String _formatDuration(int seconds) {
     final mins = seconds ~/ 60;
     final secs = seconds % 60;
-    return '${mins}:${secs.toString().padLeft(2, '0')}';
+    return '$mins:${secs.toString().padLeft(2, '0')}';
   }
 }
 
