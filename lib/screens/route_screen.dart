@@ -73,7 +73,7 @@ class _RouteScreenState extends State<RouteScreen> {
     try {
       final health = await _routeApiService.healthCheck();
       if (!mounted) return;
-      if (health['status'] == 'ok' && health['graph_loaded'] == true) {
+      if (health['status'] == 'ok') {
         setState(() {
           _isGraphReady = true;
           _isLoading = false;
