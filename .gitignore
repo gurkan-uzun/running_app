@@ -55,5 +55,4 @@ firebase.json
 # FVM
 
 # FVM Version Cache
-.fvm/flutter_sdk
-.fvm/versions/
+.fvm/
